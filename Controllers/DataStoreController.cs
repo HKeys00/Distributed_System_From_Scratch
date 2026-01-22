@@ -16,7 +16,10 @@ namespace Distributed_System_From_Scratch.Controllers
         #region Methods
 
         [HttpGet("{id:int}")]
-        public string Get([FromRoute] int id) => _dataStoreService.Get(id);
+        public string? Get([FromRoute] int id) => _dataStoreService.Get(id);
+
+        [HttpPost("{id:int}/{value}")]
+        public void Set([FromRoute] int id, [FromRoute] string value) => _dataStoreService.Set(id, value);
 
         #endregion
     }
