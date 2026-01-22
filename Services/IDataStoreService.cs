@@ -2,12 +2,12 @@
 {
     public interface IDataStoreService
     {
-        public string Get(int key);
+        string? Get(int key);
 
-        public void Set(int key, string value);
+        void Set(int key, string value);
 
-        public void Delete(int key);
+        void Delete(int key);
 
-        public void Update(int key, string value);  
+        void Update(int key, string value);  
     }
 }

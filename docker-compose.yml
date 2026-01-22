@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+    node-a:
+        image: node-image
+        container_name: node-a
+        ports: 
+        - "5001:5000"
+        environment: 
+            NODE_ID: A
+            HTTP_PORT: 5000
+            DATA_DIR: /data
+            PEERS: http://node-b:5000,http://node-c:5000
+        volumes:
+            - data-a:/data
+
+    node-b:
+        image: node-image
+        container_name: node-b
+        ports:
+          - "5002:5000"
+        environment:
+          NODE_ID: B
+          HTTP_PORT: 5000
+          DATA_DIR: /data
+          PEERS: http://node-a:5000,http://node-c:5000
+        volumes:
+          - data-b:/data
+
+    node-c:
+        image: node-image
+        container_name: node-c
+        ports:
+          - "5003:5000"
+        environment:
+          NODE_ID: C
+          HTTP_PORT: 5000
+          DATA_DIR: /data
+          PEERS: http://node-a:5000,http://node-b:5000
+        volumes:
+          - data-c:/data
+volumes:
+  data-a:
+  data-b:
+  data-c:

@@ -10,9 +10,10 @@
 
         #region Methods
 
-        public string Get(int key)
+        public string? Get(int key)
         {
-            return _dataStore[key];
+            _dataStore.TryGetValue(key, out var value);
+            return value;
         }
 
         public void Set(int key, string value)
