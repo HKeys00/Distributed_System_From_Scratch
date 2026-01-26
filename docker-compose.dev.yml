@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  node-a:
+    image: mcr.microsoft.com/dotnet/sdk:9.0
+    container_name: node-a
+    working_dir: /app
+    command: dotnet watch run --no-launch-profile
+    ports:
+      - "5001:5000"
+    environment:
+      NODE_ID: A
+      ASPNETCORE_URLS: http://0.0.0.0:5000
+      DATA_DIR: /data
+      PEERS: http://node-b:5000,http://node-c:5000
+    volumes:
+      - ./src:/app
+      - ./data/node-a:/data
+
+  node-b:
+    image: mcr.microsoft.com/dotnet/sdk:9.0
+    container_name: node-b
+    working_dir: /app
+    command: dotnet watch run --no-launch-profile
+    ports:
+      - "5002:5000"
+    environment:
+      NODE_ID: B
+      ASPNETCORE_URLS: http://0.0.0.0:5000
+      DATA_DIR: /data
+      PEERS: http://node-a:5000,http://node-c:5000
+    volumes:
+      - ./src:/app
+      - ./data/node-b:/data
+
+  node-c:
+    image: mcr.microsoft.com/dotnet/sdk:9.0
+    container_name: node-c
+    working_dir: /app
+    command: dotnet watch run --no-launch-profile
+    ports:
+      - "5003:5000"
+    environment:
+      NODE_ID: C
+      ASPNETCORE_URLS: http://0.0.0.0:5000
+      DATA_DIR: /data
+      PEERS: http://node-a:5000,http://node-b:5000
+    volumes:
+      - ./src:/app
+      - ./data/node-c:/data
