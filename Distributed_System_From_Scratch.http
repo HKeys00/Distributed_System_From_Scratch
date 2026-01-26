@@ -1,6 +1,3 @@
-@Distributed_System_From_Scratch_HostAddress = http://localhost:5231
-
-GET {{Distributed_System_From_Scratch_HostAddress}}/weatherforecast/
-Accept: application/json
+@Distributed_System_From_Scratch_HostAddress = http://0.0.0.0:5231
 
 ###

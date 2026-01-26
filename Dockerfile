@@ -1,16 +1,20 @@
-# See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
 
-# This stage is used when running from VS in fast mode (Default for Debug configuration)
-FROM mcr.microsoft.com/dotnet/sdk:9.0
-USER $APP_UID
+COPY *.csproj .
+RUN dotnet restore
 
+COPY . .
+RUN dotnet publish -c Release -o /app/publish
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 
-COPY . ./
+COPY --from=build /app/publish .
 
-ENV NODE_ID=B
-ENV HTTP_PORT=5000
-ENV DATA_DIR=/data
-ENV PEERS=http://node-a:5000,http://node-c:5000
+ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+EXPOSE 8080
 
-ENTRYPOINT ["dotnet", "run"]
+ENTRYPOINT ["dotnet", "Distributed_System_From_Scratch.dll"]
