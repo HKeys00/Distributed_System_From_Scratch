@@ -14,7 +14,7 @@ services:
       DATA_DIR: /data
       PEERS: http://node-b:5000,http://node-c:5000
     volumes:
-      - ./src:/app
+      - ./:/app
       - ./data/node-a:/data
 
   node-b:
@@ -30,7 +30,7 @@ services:
       DATA_DIR: /data
       PEERS: http://node-a:5000,http://node-c:5000
     volumes:
-      - ./src:/app
+      - ./:/app
       - ./data/node-b:/data
 
   node-c:
@@ -46,5 +46,5 @@ services:
       DATA_DIR: /data
       PEERS: http://node-a:5000,http://node-b:5000
     volumes:
-      - ./src:/app
+      - ./:/app
       - ./data/node-c:/data
