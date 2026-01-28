@@ -1,9 +1,10 @@
 ﻿namespace Distributed_System_From_Scratch.Services
 {
-    public class DataStoreService : IDataStoreService
+    public class DataStoreService(INodeCommunicationService nodeCommunicationService) : IDataStoreService
     {
         #region Fields
 
+        private readonly INodeCommunicationService _nodeCommunicationService = nodeCommunicationService;
         private readonly Dictionary<int, string> _dataStore = new();
 
         #endregion
@@ -19,6 +20,7 @@
         public void Set(int key, string value)
         {
             _dataStore[key] = value;
+            _nodeCommunicationService.SetKey(key, value);
         }
 
         public void Delete(int key)

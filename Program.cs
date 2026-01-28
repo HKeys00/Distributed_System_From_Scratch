@@ -15,6 +15,7 @@ builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<INodeInformationService, NodeInformationService>();
+builder.Services.AddSingleton<INodeCommunicationService, NodeCommunicationService>();
 builder.Services.AddSingleton<IDataStoreService, DataStoreService>();
 
 var app = builder.Build();
