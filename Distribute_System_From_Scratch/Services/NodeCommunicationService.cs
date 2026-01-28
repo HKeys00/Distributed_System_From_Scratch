@@ -8,18 +8,23 @@
         #region Fields
 
         private readonly INodeInformationService _nodeInformationService;
+        private readonly ILogger<NodeCommunicationService> _logger;
 
         #endregion
 
         #region Constructor
 
-        public NodeCommunicationService(INodeInformationService nodeInformationService)
+        public NodeCommunicationService(INodeInformationService nodeInformationService, ILogger<NodeCommunicationService> logger)
         {
             _nodeInformationService = nodeInformationService;
+            _logger = logger;
+
             var peers = _nodeInformationService.GetPeers();
+            Console.WriteLine("AHHHHH");
+            _logger.LogCritical("peer");
             foreach (var peer in peers)
             {
-                Console.WriteLine(peer);
+                _logger.LogCritical(peer);
             }
             var m = 0;
         }
