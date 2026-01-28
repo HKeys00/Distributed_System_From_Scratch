@@ -6,7 +6,7 @@ services:
         ports: 
         - "5001:8080"
         build:
-            context: ./
+            context: ./Distribute_System_From_Scratch
             dockerfile: ./Dockerfile
         environment:
             ASPNETCORE_URLS: http://0.0.0.0:8080
@@ -23,7 +23,7 @@ services:
         ports:
           - "5002:8080"
         build:
-            context: ./
+            context: ./Distribute_System_From_Scratch
             dockerfile: ./Dockerfile
         environment:
           ASPNETCORE_URLS: http://0.0.0.0:8080
@@ -40,7 +40,7 @@ services:
         ports:
           - "5003:8080"
         build:
-            context: ./
+            context: ./Distribute_System_From_Scratch
             dockerfile: ./Dockerfile
         environment:
           ASPNETCORE_URLS: http://0.0.0.0:8080
