@@ -1,3 +1,4 @@
+using Distributed_System_From_Scratch.BackgroundWorkers;
 using Distributed_System_From_Scratch.Middleware;
 using Distributed_System_From_Scratch.Services;
 
@@ -12,11 +13,14 @@ builder.Services.AddLogging(b =>
     .SetMinimumLevel(LogLevel.Information)
 );
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<INodeInformationService, NodeInformationService>();
 builder.Services.AddSingleton<INodeCommunicationService, NodeCommunicationService>();
 builder.Services.AddSingleton<IDataStoreService, DataStoreService>();
+
+builder.Services.AddHostedService<HeartBeatHostedService>();
 
 var app = builder.Build();
 

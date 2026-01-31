@@ -8,35 +8,32 @@
         #region Fields
 
         private readonly INodeInformationService _nodeInformationService;
+        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<NodeCommunicationService> _logger;
 
         #endregion
 
         #region Constructor
 
-        public NodeCommunicationService(INodeInformationService nodeInformationService, ILogger<NodeCommunicationService> logger)
+        public NodeCommunicationService(INodeInformationService nodeInformationService, IHttpClientFactory httpClientFactory, ILogger<NodeCommunicationService> logger)
         {
             _nodeInformationService = nodeInformationService;
+            _httpClientFactory = httpClientFactory;
             _logger = logger;
-
-            var peers = _nodeInformationService.GetPeers();
-            Console.WriteLine("AHHHHH");
-            _logger.LogCritical("peer");
-            foreach (var peer in peers)
-            {
-                _logger.LogCritical(peer);
-            }
-            var m = 0;
         }
 
         #endregion
 
-        public async Task PingPeers()
+        public async Task PingPeers(CancellationToken token)
         {
             var peers = _nodeInformationService.GetPeers();
-            foreach (var peer in peers) {
+            using var client = _httpClientFactory.CreateClient();
 
+            foreach (var peer in peers)
+            {
+                var response = await client.PostAsync($"{peer}/heartbeat", null);
             }
+        }
 
         public void SetKey(int key, string value)
         {

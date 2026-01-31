@@ -6,13 +6,13 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
     {
         #region Fields
 
-        private readonly NodeCommunicationService _nodeCommunicationService;
+        private readonly INodeCommunicationService _nodeCommunicationService;
 
         #endregion
 
         #region Constructor
 
-        public HeartBeatHostedService(NodeCommunicationService nodeCommunicationService)
+        public HeartBeatHostedService(INodeCommunicationService nodeCommunicationService)
         {
             _nodeCommunicationService = nodeCommunicationService;
         }
@@ -23,12 +23,12 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public async Task StartAsync(CancellationToken token)
         {
-            _nodeCommunicationService.
+            await _nodeCommunicationService.PingPeers(token);
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            //throw new NotImplementedException();
         }
 
         #endregion
