@@ -31,6 +31,13 @@
 
         #endregion
 
+        public async Task PingPeers()
+        {
+            var peers = _nodeInformationService.GetPeers();
+            foreach (var peer in peers) {
+
+            }
+
         public void SetKey(int key, string value)
         {
             throw new NotImplementedException();
