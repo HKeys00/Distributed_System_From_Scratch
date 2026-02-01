@@ -2,7 +2,7 @@
 {
     public interface INodeCommunicationService
     {
-        Task PingPeers(CancellationToken token);
+        Task PingPeers();
 
         void SetKey(int key, string value);
     }

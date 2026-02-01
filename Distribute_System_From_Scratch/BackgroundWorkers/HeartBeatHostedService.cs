@@ -1,4 +1,5 @@
 ﻿using Distributed_System_From_Scratch.Services;
+using System.Timers;
 
 namespace Distributed_System_From_Scratch.BackgroundWorkers
 {
@@ -6,29 +7,51 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
     {
         #region Fields
 
+        private System.Timers.Timer _timer;
         private readonly INodeCommunicationService _nodeCommunicationService;
+        private readonly ILogger<HeartBeatHostedService> _logger;
 
         #endregion
 
         #region Constructor
 
-        public HeartBeatHostedService(INodeCommunicationService nodeCommunicationService)
+        public HeartBeatHostedService(INodeCommunicationService nodeCommunicationService, ILogger<HeartBeatHostedService> logger)
         {
+            _timer = new System.Timers.Timer();
             _nodeCommunicationService = nodeCommunicationService;
+            _logger = logger;
         }
 
         #endregion
 
         #region Methods
 
-        public async Task StartAsync(CancellationToken token)
+        public Task StartAsync(CancellationToken token)
         {
-            await _nodeCommunicationService.PingPeers(token);
+            _timer = new System.Timers.Timer(5000);
+            _timer.Elapsed += DoWork;
+            _timer.AutoReset = true;
+            _timer.Enabled = true;
+
+            return Task.CompletedTask;
+        }
+
+        public async void DoWork(Object? source, ElapsedEventArgs e)
+        {
+            try
+            {
+                await _nodeCommunicationService.PingPeers();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Failed to Ping Peers retrying...");
+                _logger.LogWarning(ex, "Failed to Pin Peers retrying...");
+            }
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)
         {
-            //throw new NotImplementedException();
+            _timer.Dispose();
         }
 
         #endregion

@@ -2,18 +2,15 @@
 
 namespace Distributed_System_From_Scratch.Controllers
 {
-    public class HeartBeatController
+    [ApiController]
+    [Route("/heartbeat")]
+    public class HeartBeatController : ControllerBase
     {
-        [ApiController]
-        [Route("/heartbeat")]
-        public class DataStoreController : ControllerBase
-        {
-            #region Methods
+        #region Methods
 
-            [HttpPost]
-            public IActionResult Ping() => Ok();
+        [HttpPost]
+        public IActionResult Ping() => Ok();
 
-            #endregion
-        }
+        #endregion
     }
 }

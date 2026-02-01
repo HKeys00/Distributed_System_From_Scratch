@@ -24,14 +24,16 @@
 
         #endregion
 
-        public async Task PingPeers(CancellationToken token)
+        public async Task PingPeers()
         {
             var peers = _nodeInformationService.GetPeers();
+            var node = _nodeInformationService.GetNodeId();
             using var client = _httpClientFactory.CreateClient();
 
             foreach (var peer in peers)
             {
-                var response = await client.PostAsync($"{peer}/heartbeat", null);
+                var url = $"{peer}/heartbeat";
+                var response = await client.PostAsync(url, null);
             }
         }
 
