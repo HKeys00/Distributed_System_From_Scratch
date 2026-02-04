@@ -36,17 +36,9 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
             return Task.CompletedTask;
         }
 
-        public async void DoWork(Object? source, ElapsedEventArgs e)
+        public void DoWork(Object? source, ElapsedEventArgs e)
         {
-            try
-            {
-                await _nodeCommunicationService.PingPeers();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Failed to Ping Peers retrying...");
-                _logger.LogWarning(ex, "Failed to Pin Peers retrying...");
-            }
+            _nodeCommunicationService.PingPeers();
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)
@@ -55,6 +47,5 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
         }
 
         #endregion
-
     }
 }

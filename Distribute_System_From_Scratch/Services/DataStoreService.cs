@@ -20,7 +20,7 @@
         public void Set(int key, string value)
         {
             _dataStore[key] = value;
-            _nodeCommunicationService.SetKey(key, value);
+            //_nodeCommunicationService.SetKey(key, value);
         }
 
         public void Delete(int key)

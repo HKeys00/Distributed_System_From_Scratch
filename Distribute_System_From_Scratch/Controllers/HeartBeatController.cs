@@ -8,7 +8,7 @@ namespace Distributed_System_From_Scratch.Controllers
     {
         #region Methods
 
-        [HttpPost]
+        [HttpGet]
         public IActionResult Ping() => Ok();
 
         #endregion

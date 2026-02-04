@@ -54,6 +54,8 @@ services:
           PEERS: http://node-a:8080,http://node-b:8080
         volumes:
           - data-c:/data
+        networks:
+          - local
 volumes:
   data-a:
   data-b:
