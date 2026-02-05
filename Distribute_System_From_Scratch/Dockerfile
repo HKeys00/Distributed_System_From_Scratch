@@ -5,7 +5,7 @@ USER root
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y curl iputils-ping && \
+    apt-get install -y curl iputils-ping procps && \
     rm -rf /var/lib/apt/lists/*
 
 USER $APP_UID
@@ -14,10 +14,10 @@ USER $APP_UID
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["Distribute_System_From_Scratch/Distributed_System_From_Scratch.csproj", "Distribute_System_From_Scratch/"]
+COPY ["Distribute_System_From_Scratch/Distributed_System_From_Scratch.csproj", "Distributed_System_From_Scratch/"]
 RUN dotnet restore "./Distribute_System_From_Scratch/Distributed_System_From_Scratch.csproj"
 COPY . .
-WORKDIR "/src/Distribute_System_From_Scratch"
+WORKDIR "/src/Distributed_System_From_Scratch"
 RUN dotnet build "./Distributed_System_From_Scratch.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 # This stage is used to publish the service project to be copied to the final stage

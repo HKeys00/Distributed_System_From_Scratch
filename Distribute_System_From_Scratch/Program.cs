@@ -1,5 +1,4 @@
 using Distributed_System_From_Scratch.BackgroundWorkers;
-using Distributed_System_From_Scratch.Middleware;
 using Distributed_System_From_Scratch.Services;
 
 var builder = WebApplication.CreateBuilder(args);
