@@ -23,7 +23,7 @@ namespace Distributed_System_From_Scratch.Middleware
         {
             context.Request.EnableBuffering();
 
-            var node = _nodeInformation.GetNodeId();
+            var node = _nodeInformation.NodeId;
             var path = context.Request.Path;
 
             _logger.LogInformation("Node {0} received request for path {1}", node, path);

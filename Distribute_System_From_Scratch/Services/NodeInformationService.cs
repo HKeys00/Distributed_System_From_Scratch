@@ -2,36 +2,17 @@
 {
     public class NodeInformationService(IConfiguration configuration) : INodeInformationService
     {
-        #region Fields
+        #region Properties
 
-        private readonly char _nodeId = configuration.GetValue<char>("NODE_ID");
-        private readonly int _port = configuration.GetValue<int>("HTTP_PORT");
-        private readonly string _dataDir = configuration.GetValue<string>("DATA_DIR") ?? string.Empty;
-        private readonly string[] _peers = configuration.GetValue<string>("PEERS")?.Split(",") ?? [];
+        public char NodeId { get; } = configuration.GetValue<char>("NODE_ID");
 
-        #endregion
+        public int Port { get; } = configuration.GetValue<int>("HTTP_PORT");
 
-        #region Methods
+        public string DataDir { get; } = configuration.GetValue<string>("DATA_DIR") ?? string.Empty;
 
-        public char GetNodeId()
-        {
-            return _nodeId;
-        }
+        public string[] Peers { get; } = configuration.GetValue<string>("PEERS")?.Split(",") ?? [];
 
-        public int GetPortNumber()
-        {
-            return _port;
-        }
-
-        public string GetDataDirectory()
-        {
-            return _dataDir;
-        }
-
-        public string[] GetPeers()
-        {
-            return _peers;
-        }
+        public DateTime IncarnationNumber { get; } = DateTime.UtcNow;
 
         #endregion
     }

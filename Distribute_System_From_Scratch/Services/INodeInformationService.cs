@@ -6,12 +6,14 @@
     /// </summary>
     public interface INodeInformationService
     {
-        char GetNodeId();
+        char NodeId { get; }
 
-        int GetPortNumber();
+        public int Port { get; }
 
-        string GetDataDirectory();
+        public string DataDir { get; }
 
-        string[] GetPeers();
+        public string[] Peers { get; }
+
+        public DateTime IncarnationNumber { get; }
     }
 }

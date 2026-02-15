@@ -26,10 +26,9 @@ namespace Distributed_System_From_Scratch.Services
 
 
             _table = new Dictionary<string, HealthStatus>();
-            var peers = _nodeInformationService.GetPeers();
-            foreach (var peer in peers)
+            foreach (var peer in _nodeInformationService.Peers)
             {
-                _table.Add(peer, new HealthStatus() { Node =  peer });
+                _table.Add(peer, new HealthStatus() { Node =  peer, Incarnation = 0});
             }
         }
 
@@ -37,10 +36,9 @@ namespace Distributed_System_From_Scratch.Services
 
         public async Task PingPeers()
         {
-            var peers = _nodeInformationService.GetPeers();
             using var client = _httpClientFactory.CreateClient();
 
-            foreach (var peer in peers)
+            foreach (var peer in _nodeInformationService.Peers)
             {
                 var url = $"{peer}/heartbeat";
                 try
@@ -48,6 +46,16 @@ namespace Distributed_System_From_Scratch.Services
                     var response = await client.GetAsync(url);
                     if (response.IsSuccessStatusCode)
                     {
+                        var ticksString = await response.Content.ReadAsStringAsync();
+                        var incarnation = Convert.ToInt64(ticksString);
+
+                        if (_table[peer].Incarnation > incarnation)
+                        {
+                            // Discard message from old incarnation.
+                            return;
+                        }
+
+                        _table[peer].Incarnation = incarnation;
                         _table[peer].LastSeen = DateTime.UtcNow;
                     }
                 }
@@ -68,7 +76,7 @@ namespace Distributed_System_From_Scratch.Services
                         _table[peer].Status = Enums.NodeStatus.Dead;
                     }
 
-                    _logger.LogWarning($"{peer} with status {_table[peer].Status.ToString()} last seen at {_table[peer].LastSeen.ToString()}");
+                    _logger.LogWarning($"{peer}, {_table[peer].Incarnation} with status {_table[peer].Status.ToString()} last seen at {_table[peer].LastSeen.ToString()}");
                 }
             }
         }
