@@ -41,8 +41,8 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public void DoWork(Object? source, ElapsedEventArgs e)
         {
-            _nodeCommunicationService.SendCPUBoundTask(50);
-            _nodeCommunicationService.SendIOBoundTask(50);
+            _nodeCommunicationService.SendCPUBoundTask(500);
+            _nodeCommunicationService.SendIOBoundTask(500);
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)

@@ -31,7 +31,7 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public Task StartAsync(CancellationToken token)
         {
-            _timer = new System.Timers.Timer(10000);
+            _timer = new System.Timers.Timer(3000);
             _timer.Elapsed += DoWork;
             _timer.AutoReset = true;
             _timer.Enabled = true;
@@ -43,14 +43,16 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
         {
             var totalRequests = _nodeMetricsService.GetTotalRequests();
             var avgExecTime = _nodeMetricsService.GetAverageExecutionTime();
+            var avgReqTime = _nodeMetricsService.GetAverageRequestTimeMs();
             var throughput = _nodeMetricsService.GetRequestThroughput();
             var threadCount = _nodeMetricsService.GetThreadCount();
             var cpuUsage = _nodeMetricsService.GetCpuUsage();
 
             _logger.LogWarning(
-                "Node Metrics: TotalRequests={TotalRequests}, AvgExecTimeMs={AvgExecTime}, Throughput={Throughput}, ThreadCount={ThreadCount}, CpuUsage={CpuUsage}%",
+                "Node Metrics: TotalRequests={TotalRequests}, AvgExecTimeMs={AvgExecTime}, AvgReqTimeMs={AvgReqTime}, Throughput={Throughput}, ThreadCount={ThreadCount}, CpuUsage={CpuUsage}%",
                 totalRequests,
                 avgExecTime,
+                avgReqTime,
                 throughput,
                 threadCount,
                 cpuUsage

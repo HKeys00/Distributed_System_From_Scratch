@@ -16,12 +16,17 @@ namespace Distributed_System_From_Scratch.Controllers
         }
 
         [HttpPost("cpu")]
-        public IActionResult PostCPUBound()
+        public IActionResult PostCPUBound(CancellationToken token)
         {
             var sw = Stopwatch.StartNew();
             for (int i = 0; i < 100_000_000; i++)
             {
                 Math.Sqrt(i);
+                if (token.IsCancellationRequested)
+                {
+                    sw.Stop();
+                    return StatusCode(499);
+                }
             }
             sw.Stop();
             _metrics.RecordExecution(sw.ElapsedMilliseconds);
@@ -29,10 +34,17 @@ namespace Distributed_System_From_Scratch.Controllers
         }
 
         [HttpPost("io")]
-        public async Task<IActionResult> PostIOBound()
+        public async Task<IActionResult> PostIOBound(CancellationToken token)
         {
             var sw = Stopwatch.StartNew();
-            await Task.Delay(5000);
+            try
+            {
+                await Task.Delay(5000, token);
+            } catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            
             sw.Stop();
             _metrics.RecordExecution(sw.ElapsedMilliseconds);
             return Ok();

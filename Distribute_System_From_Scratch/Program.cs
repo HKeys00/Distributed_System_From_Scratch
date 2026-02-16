@@ -1,4 +1,5 @@
     using Distributed_System_From_Scratch.BackgroundWorkers;
+using Distributed_System_From_Scratch.Middleware;
 using Distributed_System_From_Scratch.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -34,8 +35,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseAuthorization();
-
+app.UseMiddleware<RequestTimeMiddleware>();
 //app.UseMiddleware<RequestResponseLoggerMiddleware>();
 
 app.MapControllers();

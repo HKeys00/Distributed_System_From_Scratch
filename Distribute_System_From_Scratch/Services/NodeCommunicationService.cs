@@ -83,7 +83,7 @@ namespace Distributed_System_From_Scratch.Services
 
         public void SendCPUBoundTask(int count)
         {
-            _logger.LogWarning("Firing CPU Bound volley, count: {count}", count);
+            //_logger.LogWarning("Firing CPU Bound volley, count: {count}", count);
             using var client = _httpClientFactory.CreateClient();
             foreach (var peer in _nodeInformationService.Peers)
             {
@@ -92,12 +92,14 @@ namespace Distributed_System_From_Scratch.Services
                 {
                     client.PostAsync(url, null);
                 }
+
+                client.CancelPendingRequests();
             }
         }
 
         public void SendIOBoundTask(int count)
         {
-            _logger.LogWarning("Firing I/O Bound volley, count: {count}", count);
+            //_logger.LogWarning("Firing I/O Bound volley, count: {count}", count);
             using var client = _httpClientFactory.CreateClient();
             foreach (var peer in _nodeInformationService.Peers)
             {
@@ -105,6 +107,7 @@ namespace Distributed_System_From_Scratch.Services
                 for (int i = 0; i < count; i++)
                 {
                     client.PostAsync(url, null);
+                    client.CancelPendingRequests();
                 }
             }
         }
