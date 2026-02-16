@@ -3,5 +3,17 @@
     public interface INodeCommunicationService
     {
         Task PingPeers();
+
+        /// <summary>
+        /// Sends an x number of requests to the /operations/cpu endpoint for each node in peers.
+        /// </summary>
+        /// <param name="count">The number of request to send.</param>
+        void SendCPUBoundTask(int count);
+
+        /// <summary>
+        /// Sends an x number of requests to the /operations/io endpoint for each node in peers.
+        /// </summary>
+        /// <param name="count">The number of request to send.</param>
+        void SendIOBoundTask(int count);
     }
 }

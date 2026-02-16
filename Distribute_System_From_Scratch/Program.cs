@@ -1,4 +1,4 @@
-using Distributed_System_From_Scratch.BackgroundWorkers;
+    using Distributed_System_From_Scratch.BackgroundWorkers;
 using Distributed_System_From_Scratch.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,8 +18,11 @@ builder.Services.AddOpenApi();
 builder.Services.AddSingleton<INodeInformationService, NodeInformationService>();
 builder.Services.AddSingleton<INodeCommunicationService, NodeCommunicationService>();
 builder.Services.AddSingleton<IDataStoreService, DataStoreService>();
+builder.Services.AddSingleton<NodeMetricsService>();
 
 builder.Services.AddHostedService<HeartBeatHostedService>();
+builder.Services.AddHostedService<OperationsHostedService>();
+builder.Services.AddHostedService<MetricsHostedService>();
 
 var app = builder.Build();
 

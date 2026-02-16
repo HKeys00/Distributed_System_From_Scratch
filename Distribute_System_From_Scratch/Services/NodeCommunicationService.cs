@@ -76,7 +76,35 @@ namespace Distributed_System_From_Scratch.Services
                         _table[peer].Status = Enums.NodeStatus.Dead;
                     }
 
-                    _logger.LogWarning($"{peer}, {_table[peer].Incarnation} with status {_table[peer].Status.ToString()} last seen at {_table[peer].LastSeen.ToString()}");
+                    //_logger.LogWarning($"{peer}, {_table[peer].Incarnation} with status {_table[peer].Status.ToString()} last seen at {_table[peer].LastSeen.ToString()}");
+                }
+            }
+        }
+
+        public void SendCPUBoundTask(int count)
+        {
+            _logger.LogWarning("Firing CPU Bound volley, count: {count}", count);
+            using var client = _httpClientFactory.CreateClient();
+            foreach (var peer in _nodeInformationService.Peers)
+            {
+                var url = $"{peer}/operations/cpu";
+                for (int i = 0; i < count; i++)
+                {
+                    client.PostAsync(url, null);
+                }
+            }
+        }
+
+        public void SendIOBoundTask(int count)
+        {
+            _logger.LogWarning("Firing I/O Bound volley, count: {count}", count);
+            using var client = _httpClientFactory.CreateClient();
+            foreach (var peer in _nodeInformationService.Peers)
+            {
+                var url = $"{peer}/operations/cpu";
+                for (int i = 0; i < count; i++)
+                {
+                    client.PostAsync(url, null);
                 }
             }
         }
