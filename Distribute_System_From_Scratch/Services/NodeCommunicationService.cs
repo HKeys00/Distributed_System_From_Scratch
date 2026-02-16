@@ -92,24 +92,25 @@ namespace Distributed_System_From_Scratch.Services
                 {
                     client.PostAsync(url, null);
                 }
-
-                client.CancelPendingRequests();
             }
         }
 
-        public void SendIOBoundTask(int count)
+        public async Task SendIOBoundTask(int count)
         {
             //_logger.LogWarning("Firing I/O Bound volley, count: {count}", count);
             using var client = _httpClientFactory.CreateClient();
-            foreach (var peer in _nodeInformationService.Peers)
+            var tasks = new Task[(count * _nodeInformationService.Peers.Length)];
+            for (int i = 0; i < _nodeInformationService.Peers.Length; i++)
             {
-                var url = $"{peer}/operations/cpu";
-                for (int i = 0; i < count; i++)
+                var peer = _nodeInformationService.Peers[i];
+                var url = $"{peer}/operations/io";
+                for (int j = 0; j < count; j++)
                 {
-                    client.PostAsync(url, null);
-                    client.CancelPendingRequests();
+                    tasks[i * j] = client.PostAsync(url, null);
                 }
             }
+
+            await Task.WhenAll(tasks);
         }
     }
 }

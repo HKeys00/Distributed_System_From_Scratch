@@ -25,7 +25,6 @@ namespace Distributed_System_From_Scratch.Middleware
                 return;
             }
 
-
             var sw = Stopwatch.StartNew();
 
             await _next.Invoke(context);
