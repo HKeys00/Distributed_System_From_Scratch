@@ -85,12 +85,13 @@ namespace Distributed_System_From_Scratch.Services
         {
             //_logger.LogWarning("Firing CPU Bound volley, count: {count}", count);
             using var client = _httpClientFactory.CreateClient();
+            var random = new Random();
             foreach (var peer in _nodeInformationService.Peers)
             {
                 var url = $"{peer}/operations/cpu";
                 for (int i = 0; i < count; i++)
                 {
-                    client.PostAsync(url, null);
+                    client.PostAsJsonAsync(url, random.Next(100_000));
                 }
             }
         }

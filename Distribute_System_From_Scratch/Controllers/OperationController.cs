@@ -16,10 +16,10 @@ namespace Distributed_System_From_Scratch.Controllers
         }
 
         [HttpPost("cpu")]
-        public IActionResult PostCPUBound(CancellationToken token)
+        public IActionResult PostCPUBound(int num, CancellationToken token)
         {
             var sw = Stopwatch.StartNew();
-            for (int i = 0; i < 100_000_000; i++)
+            for (int i = 0; i < num; i++)
             {
                 Math.Sqrt(i);
                 if (token.IsCancellationRequested)
