@@ -12,8 +12,7 @@ namespace Distributed_System_From_Scratch.Middleware
     {
         #region Constants
 
-        private const int MAX_CONCURRENT_OPERATIONS = 8;
-        private const int MAX_QUEUE_LENGTH = 100;
+        private const int MAX_QUEUE_LENGTH = 20;
 
         #endregion
 
@@ -22,9 +21,8 @@ namespace Distributed_System_From_Scratch.Middleware
         private readonly RequestDelegate _next;
         private readonly IOptions<MaxConcurrentRequestsOptions> _options;
 
-        private ConcurrentQueue<int> _queue;
-        private int _numExecutions;
-
+        private readonly SemaphoreSlim _queue;
+        
         #endregion
 
         #region Constructor
@@ -34,8 +32,7 @@ namespace Distributed_System_From_Scratch.Middleware
             _next = next;
             _options = options;
 
-            _queue = new ConcurrentQueue<int>();
-            _numExecutions = 0;
+            _queue = new SemaphoreSlim(MAX_QUEUE_LENGTH);
         }
 
         #endregion
@@ -49,38 +46,23 @@ namespace Distributed_System_From_Scratch.Middleware
                 await _next(context);
                 return;
             }
+
+            var canEnter = await _queue.WaitAsync(0);
+            if (!canEnter)
+            {
+                IHttpResponseFeature? responseFeature = context.Features.Get<IHttpResponseFeature>();
+                if (responseFeature != null)
+                {
+                    responseFeature.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    responseFeature.ReasonPhrase = "Concurrent request limit exceeded";
+                }
+
+                return;
+            }
             
-            if (CanRunOperation())
-            {
-                Interlocked.Increment(ref _numExecutions);
-                await _next(context);
-                Interlocked.Decrement(ref _numExecutions);
-            }
-
-            if (CanQueueOperation())
-            {
-                // TODO: Implement Queue logic.
-            }
-
-            IHttpResponseFeature? responseFeature = context.Features.Get<IHttpResponseFeature>();
-            if (responseFeature != null)
-            {
-                responseFeature.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                responseFeature.ReasonPhrase = "Concurrent request limit exceeded";
-            }
+            await _next(context);
+            _queue.Release(1);
         }
-
-        /// <summary>
-        /// Returns if the operation can be run immediately.
-        /// </summary>
-        /// <returns>a bool.</returns>
-        private bool CanRunOperation() => Volatile.Read(ref _numExecutions) < MAX_CONCURRENT_OPERATIONS;
-
-        /// <summary>
-        /// Returns if the operation can be queued.
-        /// </summary>
-        /// <returns>a bool.</returns>
-        private bool CanQueueOperation() => _queue.Count < MAX_QUEUE_LENGTH;
 
         #endregion
     }

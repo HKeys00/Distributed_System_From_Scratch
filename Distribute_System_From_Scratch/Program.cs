@@ -1,4 +1,4 @@
-    using Distributed_System_From_Scratch.BackgroundWorkers;
+using Distributed_System_From_Scratch.BackgroundWorkers;
 using Distributed_System_From_Scratch.Middleware;
 using Distributed_System_From_Scratch.Middleware.Options;
 using Distributed_System_From_Scratch.Services;
@@ -40,6 +40,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseMiddleware<RequestTimeMiddleware>();
+app.UseMiddleware<MaxConcurrentRequestsMiddleware>();
 //app.UseMiddleware<RequestResponseLoggerMiddleware>();
 
 app.MapControllers();

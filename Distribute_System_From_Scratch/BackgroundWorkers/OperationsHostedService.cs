@@ -33,7 +33,7 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
         {
             _timer = new System.Timers.Timer(10000);
             _timer.Elapsed += DoWork;
-            _timer.AutoReset = true;
+            _timer.AutoReset = false;
             _timer.Enabled = true;
 
             return Task.CompletedTask;
@@ -41,7 +41,7 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public void DoWork(Object? source, ElapsedEventArgs e)
         {
-            _nodeCommunicationService.SendCPUBoundTask(500);
+            _nodeCommunicationService.SendCPUBoundTask(50);
             //_nodeCommunicationService.SendIOBoundTask(1000);
         }
 
