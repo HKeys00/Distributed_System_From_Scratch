@@ -13,7 +13,7 @@ namespace Distributed_System_From_Scratch.Middleware
         #region Constants
 
         private const int MAX_QUEUE_LENGTH = 20;
-
+        private const int MAX_CONCURRENT_LENGTH = 10;
         #endregion
 
         #region Fields
@@ -21,6 +21,7 @@ namespace Distributed_System_From_Scratch.Middleware
         private readonly RequestDelegate _next;
         private readonly IOptions<MaxConcurrentRequestsOptions> _options;
 
+        private readonly SemaphoreSlim _concurrent;
         private readonly SemaphoreSlim _queue;
         
         #endregion
@@ -32,7 +33,8 @@ namespace Distributed_System_From_Scratch.Middleware
             _next = next;
             _options = options;
 
-            _queue = new SemaphoreSlim(MAX_QUEUE_LENGTH);
+            _concurrent = new SemaphoreSlim(MAX_CONCURRENT_LENGTH, MAX_CONCURRENT_LENGTH);
+            _queue = new SemaphoreSlim(MAX_QUEUE_LENGTH, MAX_QUEUE_LENGTH);
         }
 
         #endregion
@@ -47,8 +49,8 @@ namespace Distributed_System_From_Scratch.Middleware
                 return;
             }
 
-            var canEnter = await _queue.WaitAsync(0);
-            if (!canEnter)
+            var canEnterQueue = await _queue.WaitAsync(0);
+            if (!canEnterQueue)
             {
                 IHttpResponseFeature? responseFeature = context.Features.Get<IHttpResponseFeature>();
                 if (responseFeature != null)
@@ -59,9 +61,12 @@ namespace Distributed_System_From_Scratch.Middleware
 
                 return;
             }
-            
+
+            await _concurrent.WaitAsync(context.RequestAborted);
+            _queue.Release();
+
             await _next(context);
-            _queue.Release(1);
+            _concurrent.Release();
         }
 
         #endregion
