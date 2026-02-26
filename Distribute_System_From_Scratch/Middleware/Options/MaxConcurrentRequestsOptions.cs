@@ -6,5 +6,10 @@
         /// Gets or sets if throttling is enabled
         /// </summary>
         public bool Enabled { get; set; }
+
+        /// <summary>
+        /// The endpoints that should be throttled.
+        /// </summary>
+        public required string[] EndPoints { get; set; }
     }
 }

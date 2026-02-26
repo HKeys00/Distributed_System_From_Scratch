@@ -30,7 +30,7 @@ namespace Distributed_System_From_Scratch.Middleware
             await _next.Invoke(context);
 
             sw.Stop();
-            if (context.Response.StatusCode != 499)
+            if (context.Response.StatusCode != 499 && context.Response.StatusCode != 503)
             {
                 _nodeMetricsService.RecordRequest(sw.ElapsedMilliseconds);
             }

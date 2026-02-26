@@ -49,6 +49,13 @@ namespace Distributed_System_From_Scratch.Middleware
                 return;
             }
 
+            var path = context.Request.Path.ToString();
+            if (!_options.Value.EndPoints.Contains(path))
+            {
+                await _next(context);
+                return;
+            }
+
             var canEnterQueue = await _queue.WaitAsync(0);
             if (!canEnterQueue)
             {
@@ -62,11 +69,22 @@ namespace Distributed_System_From_Scratch.Middleware
                 return;
             }
 
-            await _concurrent.WaitAsync(context.RequestAborted);
-            _queue.Release();
-
-            await _next(context);
-            _concurrent.Release();
+            try
+            {
+                await _concurrent.WaitAsync(context.RequestAborted);
+            } finally
+            {
+                _queue.Release();
+            }         
+            
+            try
+            {
+                await _next(context);
+            } finally
+            {
+                _concurrent.Release();
+            }           
+            
         }
 
         #endregion

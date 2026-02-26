@@ -85,11 +85,6 @@ namespace Distributed_System_From_Scratch.Services
         public async Task SendCPUBoundTask(int count)
         {
             //_logger.LogWarning("Firing CPU Bound volley, count: {count}", count);
-            if (_nodeInformationService.NodeId != 'B')
-            {
-                return; //Test only B Sending requests.
-            }
-
             using var client = _httpClientFactory.CreateClient();
             var random = new Random();
             var requests = new List<Task<HttpResponseMessage>>();
@@ -101,10 +96,6 @@ namespace Distributed_System_From_Scratch.Services
                     requests.Add(client.PostAsJsonAsync(url, random.Next(100_000)));
                 }
             }
-
-            await Task.WhenAll(requests);
-            var countSucceeded = requests.Count(r => r.Result.StatusCode != HttpStatusCode.ServiceUnavailable); //Should be 10 * num peers;
-            var countFailed = requests.Count(r => r.Result.StatusCode == HttpStatusCode.ServiceUnavailable); //should be count - (10 * num peers);
         }
 
         public async Task SendIOBoundTask(int count)
