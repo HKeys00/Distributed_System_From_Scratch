@@ -11,6 +11,7 @@ namespace Distributed_System_From_Scratch.Services
         //private readonly PerformanceCounter 
 
         private long _totalRequests;
+        private long _totalExecutions;
         private long _totalExecutionTimeMs;
         private long _totalRequestTimeMs;
         private long _lastThroughputCount;
@@ -20,6 +21,7 @@ namespace Distributed_System_From_Scratch.Services
 
         public void RecordExecution(long elapsedMs)
         {
+            Interlocked.Increment(ref _totalExecutions);
             Interlocked.Add(ref _totalExecutionTimeMs, elapsedMs);
         }
 
@@ -33,7 +35,7 @@ namespace Distributed_System_From_Scratch.Services
             _totalRequests == 0 ? 0 : (double)_totalRequestTimeMs / _totalRequests;
 
         public double GetAverageExecutionTime() =>
-            _totalRequests == 0 ? 0 : (double)_totalExecutionTimeMs / _totalRequests;
+            _totalExecutions == 0 ? 0 : (double)_totalExecutionTimeMs / _totalExecutions;
 
         public long GetTotalRequests() => Interlocked.Read(ref _totalRequests);
 

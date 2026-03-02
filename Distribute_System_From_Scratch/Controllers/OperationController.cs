@@ -16,7 +16,7 @@ namespace Distributed_System_From_Scratch.Controllers
         }
 
         [HttpPost("cpu")]
-        public IActionResult PostCPUBound(int num, CancellationToken token)
+        public IActionResult PostCPUBound([FromBody] int num, CancellationToken token)
         {
             var sw = Stopwatch.StartNew();
             for (int i = 0; i < num; i++)
@@ -29,7 +29,8 @@ namespace Distributed_System_From_Scratch.Controllers
                 }
             }
             sw.Stop();
-            _metrics.RecordExecution(sw.ElapsedMilliseconds);
+            long elapsed = sw.ElapsedMilliseconds;
+            _metrics.RecordExecution(elapsed);
             return Ok();
         }
 

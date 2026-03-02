@@ -84,7 +84,6 @@ namespace Distributed_System_From_Scratch.Services
 
         public async Task SendCPUBoundTask(int count)
         {
-            //_logger.LogWarning("Firing CPU Bound volley, count: {count}", count);
             using var client = _httpClientFactory.CreateClient();
             var random = new Random();
             var requests = new List<Task<HttpResponseMessage>>();
@@ -93,9 +92,12 @@ namespace Distributed_System_From_Scratch.Services
                 var url = $"{peer}/operations/cpu";
                 for (int i = 0; i < count; i++)
                 {
-                    requests.Add(client.PostAsJsonAsync(url, random.Next(100_000)));
+                    requests.Add(client.PostAsJsonAsync(url, 100_000_000));
                 }
             }
+
+            Task.WaitAll(requests);
+            var m = 0;
         }
 
         public async Task SendIOBoundTask(int count)
@@ -109,7 +111,8 @@ namespace Distributed_System_From_Scratch.Services
                 var url = $"{peer}/operations/io";
                 for (int j = 0; j < count; j++)
                 {
-                    tasks[i * j] = client.PostAsync(url, null);
+                    //tasks[i * j] = await client.PostAsync(url, null);
+                    await client.PostAsync(url, null);
                 }
             }
 

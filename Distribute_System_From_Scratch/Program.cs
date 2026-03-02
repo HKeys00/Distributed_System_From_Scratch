@@ -25,7 +25,7 @@ builder.Services.AddSingleton<INodeCommunicationService, NodeCommunicationServic
 builder.Services.AddSingleton<IDataStoreService, DataStoreService>();
 builder.Services.AddSingleton<NodeMetricsService>();
 
-builder.Services.AddHostedService<HeartBeatHostedService>();
+//builder.Services.AddHostedService<HeartBeatHostedService>();
 builder.Services.AddHostedService<OperationsHostedService>();
 builder.Services.AddHostedService<MetricsHostedService>();
 
@@ -40,7 +40,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseMiddleware<RequestTimeMiddleware>();
-app.UseMiddleware<MaxConcurrentRequestsMiddleware>();
+//app.UseMiddleware<MaxConcurrentRequestsMiddleware>();
 //app.UseMiddleware<RequestResponseLoggerMiddleware>();
 
 app.MapControllers();

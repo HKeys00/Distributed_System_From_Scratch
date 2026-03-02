@@ -13,6 +13,7 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
         private System.Timers.Timer _timer;
         private readonly INodeCommunicationService _nodeCommunicationService;
         private readonly ILogger<OperationsHostedService> _logger;
+        private int _count;
 
         #endregion
 
@@ -31,9 +32,9 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public Task StartAsync(CancellationToken token)
         {
-            _timer = new System.Timers.Timer(10000);
+            _timer = new System.Timers.Timer(5000);
             _timer.Elapsed += DoWork;
-            _timer.AutoReset = false;
+            _timer.AutoReset = true;
             _timer.Enabled = true;
 
             return Task.CompletedTask;
@@ -41,8 +42,10 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public void DoWork(Object? source, ElapsedEventArgs e)
         {
-            _nodeCommunicationService.SendCPUBoundTask(50);
-            _nodeCommunicationService.SendIOBoundTask(50);
+            //_nodeCommunicationService.SendCPUBoundTask(_count);
+            _nodeCommunicationService.SendIOBoundTask(_count);
+
+            _count++;
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)

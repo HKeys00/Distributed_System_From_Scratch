@@ -38,7 +38,7 @@ namespace Distributed_System_From_Scratch.BackgroundWorkers
 
         public void DoWork(Object? source, ElapsedEventArgs e)
         {
-            //_nodeCommunicationService.PingPeers();
+            _nodeCommunicationService.PingPeers();
         }
 
         public async Task StopAsync(CancellationToken cancellationToken)
