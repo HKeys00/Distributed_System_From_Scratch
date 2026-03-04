@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "WebServer": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
