@@ -4,7 +4,7 @@
       "commandName": "DockerCompose",
       "commandVersion": "1.0",
       "serviceActions": {
-        "distributed_system_from_scratch": "StartDebugging"
+        "worker_node": "StartDebugging"
       }
     }
   }
