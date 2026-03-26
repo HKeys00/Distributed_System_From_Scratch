@@ -67,7 +67,7 @@ namespace Shared.Services
         /// </summary>
         /// <param name="peers"></param>
         /// <returns></returns>
-        private async Task SendHeartBeat(string[] peers)
+        public async Task SendHeartBeat(string[] peers)
         {
 
         }
