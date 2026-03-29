@@ -13,7 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Data", "Data\Data.csproj", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Controllers", "Controllers\Controllers.csproj", "{25C8D45D-B438-44C0-BAF3-4F0C9C7CFE31}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Relay", "Relay\Relay.csproj", "{4B7BF330-7A51-4C08-A2A2-0AFD3467F7A6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Relay", "Relay\Relay.csproj", "{96079B1A-1C85-4029-ADEA-126A28FE9902}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -41,10 +41,10 @@ Global
 		{25C8D45D-B438-44C0-BAF3-4F0C9C7CFE31}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{25C8D45D-B438-44C0-BAF3-4F0C9C7CFE31}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{25C8D45D-B438-44C0-BAF3-4F0C9C7CFE31}.Release|Any CPU.Build.0 = Release|Any CPU
-		{4B7BF330-7A51-4C08-A2A2-0AFD3467F7A6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{4B7BF330-7A51-4C08-A2A2-0AFD3467F7A6}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{4B7BF330-7A51-4C08-A2A2-0AFD3467F7A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{4B7BF330-7A51-4C08-A2A2-0AFD3467F7A6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{96079B1A-1C85-4029-ADEA-126A28FE9902}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{96079B1A-1C85-4029-ADEA-126A28FE9902}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{96079B1A-1C85-4029-ADEA-126A28FE9902}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{96079B1A-1C85-4029-ADEA-126A28FE9902}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
