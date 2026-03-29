@@ -1,54 +1,43 @@
 services:
-  node-a:
+  controllers:
     build:
         context: .
-        dockerfile: Worker_Node/Dockerfile
+        dockerfile: Controllers/Dockerfile
     image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: node-a
+    container_name: worker-node
     working_dir: /app
     ports:
       - "5001:5000"
     environment:
+      ASPNETCORE_URLS: http://0.0.0.0:5000
+    volumes:
+      - ./data/worker-node:/data
+
+   relay:
+    build:
+        context: .
+        dockerfile: Relay/Dockerfile
+    image: mcr.microsoft.com/dotnet/sdk:9.0
+    container_name: worker-node
+    working_dir: /app
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./data/worker-node:/data
+
+  worker-node:
+    build:
+        context: .
+        dockerfile: Worker_Node/Dockerfile
+    image: mcr.microsoft.com/dotnet/sdk:9.0
+    container_name: worker-node
+    working_dir: /app
+    environment:
       NODE_ID: A
-      ASPNETCORE_URLS: http://0.0.0.0:5000
       DATA_DIR: /data
-      PEERS: http://node-b:5000,http://node-c:5000
+      PEERS:
     volumes:
-      - ./data/node-a:/data
-
-  node-b:
-    build:
-        context: .
-        dockerfile: Worker_Node/Dockerfile
-    image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: node-b
-    working_dir: /app
-    ports:
-      - "5002:5000"
-    environment:
-      NODE_ID: B
-      ASPNETCORE_URLS: http://0.0.0.0:5000
-      DATA_DIR: /data
-      PEERS: http://node-a:5000,http://node-c:5000
-    volumes:
-      - ./data/node-b:/data
-
-  node-c:
-    build:
-        context: .
-        dockerfile: Worker_Node/Dockerfile
-    image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: node-c
-    working_dir: /app
-    ports:
-      - "5003:5000"
-    environment:
-      NODE_ID: C
-      ASPNETCORE_URLS: http://0.0.0.0:5000
-      DATA_DIR: /data
-      PEERS: http://node-a:5000,http://node-b:5000
-    volumes:
-      - ./data/node-c:/data
+      - ./data/worker-node:/data
 
   postgres_db:
     image: postgres:16

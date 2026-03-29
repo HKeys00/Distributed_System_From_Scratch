@@ -4,7 +4,7 @@ using Shared.Constants;
 using Shared.Models;
 using Worker_Node.Services.Queue;
 
-namespace Worker_Node.Controllers
+namespace Controllers.Controllers
 {
     /// <summary>
     /// Handles image-related HTTP requests in the application.

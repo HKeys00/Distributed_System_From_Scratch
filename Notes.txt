@@ -3,4 +3,7 @@
 - The architecture involves requests flowing towards a controller on the ASP.NET node I've set up, this controller will then try to place that request on the Ingress queue, this queue has a set max length to avoid the node being overwhelmed with requests, if there's not room on the queue the controller responds with a 429 error code or 202 status code if the task was added to the queue, I used a channel as my queue because it works very well for the publisher consumer pattern I'm setting up
 - Next I created a work item dispatcher which will monitor this queue and then based on the execution type (CPU or IO bound) will pass that work item to the respective CPU bound or IO bound worker queue, these queues have different size constraints due to the nature of the work they perform. 
 - If the dispatcher attempts to pass this work item to a queue that is full, the request will be dropped and logged, this isn't a permanent solution but for simplicity that what I've gone for for the time being.
-- 
+
+30/03/26
+- And now my architecture has completely shifted again
+- Now i'm using the outbox pattern with a postgres database to store items, and a relayer service will push those tasks in batches to my RabbitMQ system that will then publish those messages to the worker nodes 
