@@ -7,3 +7,6 @@
 30/03/26
 - And now my architecture has completely shifted again
 - Now i'm using the outbox pattern with a postgres database to store items, and a relayer service will push those tasks in batches to my RabbitMQ system that will then publish those messages to the worker nodes 
+
+1/04/26
+- If I'm to implement a lease based approach for grabbing tasks, I'll need to implement a fencing token so that any nodes that grab a task, pause, lose the lease and then try to complete the task are met with an error

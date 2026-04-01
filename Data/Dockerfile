@@ -4,7 +4,6 @@
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 USER $APP_UID
 WORKDIR /app
-
 EXPOSE 8080
 EXPOSE 8081
 
@@ -13,19 +12,20 @@ EXPOSE 8081
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["Controllers/Controllers.csproj", "Controllers/"]
-RUN dotnet restore "./Controllers/Controllers.csproj"
+COPY ["Data/Data.csproj", "Data/"]
+RUN dotnet restore "./Data/Data.csproj"
 COPY . .
-WORKDIR "/src/Controllers"
-RUN dotnet build "./Controllers.csproj" -c $BUILD_CONFIGURATION -o /app/build
+WORKDIR "/src/Data"
+RUN dotnet build "./Data.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 # This stage is used to publish the service project to be copied to the final stage
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./Controllers.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "./Data.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+CMD dotnet ef database update --environment Development --project src/Data
 
 # This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "Controllers.dll"]
+ENTRYPOINT ["dotnet", "Data.dll"]

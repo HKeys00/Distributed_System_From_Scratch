@@ -1,44 +1,4 @@
 services:
-  controllers:
-    build:
-        context: .
-        dockerfile: Controllers/Dockerfile
-    image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: worker-node
-    working_dir: /app
-    ports:
-      - "5001:5000"
-    environment:
-      ASPNETCORE_URLS: http://0.0.0.0:5000
-    volumes:
-      - ./data/worker-node:/data
-
-   relay:
-    build:
-        context: .
-        dockerfile: Relay/Dockerfile
-    image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: worker-node
-    working_dir: /app
-    ports:
-      - "5001:5000"
-    volumes:
-      - ./data/worker-node:/data
-
-  worker-node:
-    build:
-        context: .
-        dockerfile: Worker_Node/Dockerfile
-    image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: worker-node
-    working_dir: /app
-    environment:
-      NODE_ID: A
-      DATA_DIR: /data
-      PEERS:
-    volumes:
-      - ./data/worker-node:/data
-
   postgres_db:
     image: postgres:16
     restart: always
@@ -48,8 +8,51 @@ services:
       POSTGRES_DB: mydatabase
     ports:
       - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+
+  data:
+    build:
+        context: .
+        dockerfile: Data/Dockerfile
+    container_name: data
+    working_dir: /app
+    depends_on:
+      - postgres_db
+
+  controllers:
+    build:
+        context: .
+        dockerfile: Controllers/Dockerfile
+    container_name: controllers
+    working_dir: /app
+    ports:
+      - "5001:5000"
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:5000
+    depends_on:
+      - data
+
+  relay:
+    build:
+        context: .
+        dockerfile: Relay/Dockerfile
+    image: mcr.microsoft.com/dotnet/sdk:9.0
+    container_name: relay
+    working_dir: /app
+    depends_on:
+      - data
+
+  worker-node:
+    build:
+        context: .
+        dockerfile: Worker_Node/Dockerfile
+    container_name: worker-node
+    working_dir: /app
+    environment:
+      NODE_ID: A
+      DATA_DIR: /data
+      PEERS:
+    depends_on:
+      - data
 
 volumes:
   pgdata:

@@ -1,8 +1,10 @@
-﻿using System.Dynamic;
+﻿using Data;
+using Data.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
 using Shared.Constants;
-using Shared.Models;
-using Worker_Node.Services.Queue;
+using System.Dynamic;
 
 namespace Controllers.Controllers
 {
@@ -15,7 +17,7 @@ namespace Controllers.Controllers
     {
         #region Fields
 
-        private readonly IIngressQueueService _ingressQueueService;
+        private readonly IDbContextFactory<ApplicationDbContext> _dbContextFactory;
 
         #endregion
 
@@ -24,10 +26,10 @@ namespace Controllers.Controllers
         /// <summary>
         /// Initializes a new instance of the ImageController class with the specified ingress queue service.
         /// </summary>
-        /// <param name="ingressQueueService">The service used to handle ingress queue operations.</param>
-        public ImageController(IIngressQueueService ingressQueueService)
+        /// <param name="dbContextFactory">The injected db context factory.</param>
+        public ImageController(IDbContextFactory<ApplicationDbContext> dbContextFactory)
         {
-            _ingressQueueService = ingressQueueService;
+            _dbContextFactory = dbContextFactory;
         }
 
         #endregion
@@ -40,19 +42,34 @@ namespace Controllers.Controllers
         /// <param name="data">The byte array containing the image data to compress.</param>
         /// <param name="token">A token to monitor for cancellation requests.</param>
         [HttpPost("compress")]
-        public async Task<IActionResult> CompressImage([FromBody] byte[] data, CancellationToken token)
+        public async Task<IActionResult> CompressImage(CancellationToken token)
         {
             var payload = new ExpandoObject();
-            payload.TryAdd("Data", data);
+            //payload.TryAdd("Data", data);
 
-            var result = await _ingressQueueService.TryEnqueueAsync(payload, "image_compress", ExecutionType.CPU, token);
-            
-            if (result == null)
+            WorkItem item = new WorkItem()
+            {
+                TaskId = Guid.NewGuid(),
+                TaskType = "image-compress",
+                ExecutionType = ExecutionType.CPU,
+                Payload = "payload"
+                //CreatedAt
+            };
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            context.Tasks.Add(item);
+
+            try
+            {
+                await context.SaveChangesAsync();
+            }
+            catch (Exception ex)
             {
                 return StatusCode(429, "Too many requests. Please try again later.");
             }
+                     
 
-            return Accepted(result);
+            return Accepted(item.TaskId);
         }
 
         #endregion
