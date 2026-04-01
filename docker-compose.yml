@@ -31,28 +31,27 @@ services:
     depends_on:
       - data
 
-  relay:
-    build:
-        context: .
-        dockerfile: Relay/Dockerfile
-    image: mcr.microsoft.com/dotnet/sdk:9.0
-    container_name: relay
-    working_dir: /app
-    depends_on:
-      - data
+  # relay:
+  #   build:
+  #       context: .
+  #       dockerfile: Relay/Dockerfile
+  #   container_name: relay
+  #   working_dir: /app
+  #   depends_on:
+  #     - data
 
-  worker-node:
-    build:
-        context: .
-        dockerfile: Worker_Node/Dockerfile
-    container_name: worker-node
-    working_dir: /app
-    environment:
-      NODE_ID: A
-      DATA_DIR: /data
-      PEERS:
-    depends_on:
-      - data
+  # worker-node:
+  #   build:
+  #       context: .
+  #       dockerfile: Worker_Node/Dockerfile
+  #   container_name: worker-node
+  #   working_dir: /app
+  #   environment:
+  #     NODE_ID: A
+  #     DATA_DIR: /data
+  #     PEERS:
+  #   depends_on:
+  #     - data
 
 volumes:
   pgdata:
