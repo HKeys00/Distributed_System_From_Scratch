@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Internal;
 using Shared.Constants;
 using System.Dynamic;
+using System.Text.Json;
 
 namespace Controllers.Controllers
 {
@@ -45,14 +46,14 @@ namespace Controllers.Controllers
         public async Task<IActionResult> CompressImage(CancellationToken token)
         {
             var payload = new ExpandoObject();
-            //payload.TryAdd("Data", data);
+            payload.TryAdd("Data", "AHHHH");
 
             WorkItem item = new WorkItem()
             {
                 TaskId = Guid.NewGuid(),
                 TaskType = "image-compress",
                 ExecutionType = ExecutionType.CPU,
-                Payload = "payload"
+                Payload = JsonSerializer.Serialize(payload)
                 //CreatedAt
             };
 

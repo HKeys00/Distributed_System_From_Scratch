@@ -10,3 +10,6 @@
 
 1/04/26
 - If I'm to implement a lease based approach for grabbing tasks, I'll need to implement a fencing token so that any nodes that grab a task, pause, lose the lease and then try to complete the task are met with an error
+
+2/04/26
+- Need to fix cannot load library libgssapi_krb5 error, working fine but still annoying
