@@ -19,6 +19,7 @@ namespace Controllers.Controllers
         #region Fields
 
         private readonly IDbContextFactory<ApplicationDbContext> _dbContextFactory;
+        private readonly int _maxUnpublishedRequests = 10; //Temp value for now need to figure out a better way of sharing this across multiple controllers.
 
         #endregion
 
@@ -45,6 +46,14 @@ namespace Controllers.Controllers
         [HttpPost("compress")]
         public async Task<IActionResult> CompressImage(CancellationToken token)
         {
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+
+            var pendingCount = await context.Tasks.Where(t => t.PublishedAt == null).CountAsync(token);
+            if (pendingCount > _maxUnpublishedRequests)
+            {
+                return StatusCode(429, "Too many requests. Please try again later.");
+            }
+
             var payload = new ExpandoObject();
             payload.TryAdd("Data", "AHHHH");
 
@@ -54,10 +63,8 @@ namespace Controllers.Controllers
                 TaskType = "image-compress",
                 ExecutionType = ExecutionType.CPU,
                 Payload = JsonSerializer.Serialize(payload)
-                //CreatedAt
             };
 
-            await using var context = await _dbContextFactory.CreateDbContextAsync();
             context.Tasks.Add(item);
 
             try
@@ -66,7 +73,7 @@ namespace Controllers.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(429, "Too many requests. Please try again later.");
+                return StatusCode(500, $"Internal server error. {ex.Message}"); //String interpolation not very performant.
             }
                      
 

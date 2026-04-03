@@ -36,6 +36,10 @@ namespace Data
 
             modelBuilder.Entity<WorkItem>()
                 .HasIndex(w => w.TaskId);
+
+            modelBuilder.Entity<WorkItem>()
+                .Property(w => w.CreatedAt)
+                .HasDefaultValueSql("clock_timestamp()");
         }
 
         #endregion
