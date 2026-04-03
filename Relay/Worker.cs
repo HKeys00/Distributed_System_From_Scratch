@@ -1,6 +1,9 @@
 using Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Data.Common;
+using System.Threading;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace Relay
 {
@@ -37,14 +40,18 @@ namespace Relay
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await using var connection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
-
             await connection.OpenAsync();
-
             connection.Notification += OnNotify;
-
             await using (var cmd = new NpgsqlCommand("LISTEN task_channel", connection))
             {
                 await cmd.ExecuteNonQueryAsync(stoppingToken);
+            }
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await connection
+                    .WaitAsync(stoppingToken)
+                    .ConfigureAwait(false);
             }
         }
 
