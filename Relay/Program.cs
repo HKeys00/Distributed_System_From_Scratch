@@ -9,5 +9,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddDbContextFactory<ApplicationDbContext>();
 builder.Services.AddHostedService<Worker>();
 
+
+
 var host = builder.Build();
 host.Run();

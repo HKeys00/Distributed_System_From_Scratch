@@ -32,7 +32,7 @@ namespace Data.Models
         /// The payload data of the work item.
         /// </summary>
         [Column(TypeName = "jsonb")]
-        public required dynamic Payload { get; set; }
+        public required string Payload { get; set; }
 
         /// <summary>
         /// When this work item was created.

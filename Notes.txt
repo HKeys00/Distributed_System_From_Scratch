@@ -13,3 +13,15 @@
 
 2/04/26
 - Need to fix cannot load library libgssapi_krb5 error, working fine but still annoying
+
+3/04/26
+- Finally got the outbox flow of my application working, a controller can upload a task to the database, the relay worker is then notified of that insert operation. Now the next step is for the relay worker to publish that event to RabbitMQ and then update the status of the task to published, this all needs to occur atomically so that if power was lost between these steps the system wouldn't be left in a weird state.
+- Also need to figure out how I'm handling back pressure here, is it the controllers job to query the table for the number of published but not complete work items, we actually probably just want to test the number of unpublished work items, since the rabbit mq channel should be durable so these messages shouldn't be lost if the published is not null
+- Need a way of managing different max number of unpublished counts across different controllers, should the number of allowed pending tasks be task type dependent?
+- Need to implement a singleton service for creating and holding the relay rabbit mq connection, since it seems that it's expensive to create and destroy one constantly.
+- Seems like the goal is to create a connection per application lifetime and then use a channel pool
+
+4/04/26
+- Need to batch work items to improve throughput but for the time being just sending one item across the channel at a time.
+- Need to look at how I'm setting up my queue, what should i have a x-queue-type
+

@@ -1,9 +1,8 @@
 using Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using System.Data.Common;
-using System.Threading;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
+using System.Text;
+using RabbitMQ.Client;
 
 namespace Relay
 {
@@ -11,9 +10,15 @@ namespace Relay
     {
         #region Fields
 
+        private IConnection? _rabbitConnection;
+        private IChannel? _rabbitChannel;
+
         private readonly IDbContextFactory<ApplicationDbContext> _dbContextFactory;
         private readonly IConfiguration _configuration;
         private readonly ILogger<Worker> _logger;
+
+        private int _batchedItems;
+        private int _maxBatchedItems = 10;
 
         #endregion
 
@@ -30,6 +35,8 @@ namespace Relay
             _configuration = configuration;
             _dbContextFactory = dbContextFactory;
             _logger = logger;
+            _batchedItems = 0;
+            _maxBatchedItems = 10;
         }
 
         #endregion
@@ -39,6 +46,12 @@ namespace Relay
         /// <inheritdoc />
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+             var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
+            _rabbitConnection = await factory.CreateConnectionAsync(stoppingToken);
+            _rabbitChannel = await _rabbitConnection.CreateChannelAsync(null, stoppingToken);
+
+            await _rabbitChannel.QueueDeclareAsync("outbox", true, true, cancellationToken: stoppingToken);
+            
             await using var connection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
             await connection.OpenAsync();
             connection.Notification += OnNotify;
@@ -62,6 +75,24 @@ namespace Relay
         /// <param name="args">The event arguments.</param>
         private async void OnNotify(object obj, NpgsqlNotificationEventArgs args)
         {
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            var tasks = await context.Tasks.Where(t => t.PublishedAt == null).ToArrayAsync();
+
+            if (_rabbitConnection == null)
+            {
+                throw new Exception("Connection to rabbitMQ doesn't exist");
+            }
+
+            if (_rabbitChannel == null || _rabbitChannel.IsClosed)
+            {
+                _rabbitChannel = await _rabbitConnection.CreateChannelAsync();
+            }
+
+            foreach (var task in tasks)
+            {
+                await _rabbitChannel.BasicPublishAsync(string.Empty, "outbox", Encoding.UTF8.GetBytes(task.Payload));
+            }
+
             var m = 0;
         }
 
