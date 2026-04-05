@@ -92,8 +92,6 @@ namespace Relay
             {
                 await _rabbitChannel.BasicPublishAsync(string.Empty, "outbox", Encoding.UTF8.GetBytes(task.Payload));
             }
-
-            var m = 0;
         }
 
         #endregion
