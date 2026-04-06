@@ -48,7 +48,7 @@ namespace Controllers.Controllers
         {
             await using var context = await _dbContextFactory.CreateDbContextAsync();
 
-            var pendingCount = await context.Tasks.Where(t => t.PublishedAt == null).CountAsync(token);
+            var pendingCount = await context.Outbox.CountAsync(token);
             if (pendingCount > _maxUnpublishedRequests)
             {
                 return StatusCode(429, "Too many requests. Please try again later.");
@@ -66,10 +66,11 @@ namespace Controllers.Controllers
             };
 
             context.Tasks.Add(item);
+            context.Outbox.Add(item);
 
             try
             {
-                await context.SaveChangesAsync();
+                await context.SaveChangesAsync(token);
             }
             catch (Exception ex)
             {

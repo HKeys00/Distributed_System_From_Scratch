@@ -41,12 +41,6 @@ namespace Data.Models
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
-        /// When this work item was published to the outbox.
-        /// </summary>
-        [Column(TypeName = "timestamptz")]
-        public DateTime? PublishedAt { get; set; }
-
-        /// <summary>
         /// The number of retries this work item has undergone.
         /// </summary>
         public int Retries { get; set; }

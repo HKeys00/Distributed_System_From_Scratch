@@ -12,6 +12,11 @@ namespace Data
         /// </summary>
         public DbSet<WorkItem> Tasks { get; set; }
 
+        /// <summary>
+        /// Gets or sets the table containing message sitting in the outbox.
+        /// </summary>
+        public DbSet<WorkItem> Outbox { get; set; }
+
         #endregion
 
         #region Constructor
@@ -30,9 +35,6 @@ namespace Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            modelBuilder.Entity<WorkItem>()
-                .HasIndex(w => w.Id)
-                .HasFilter("\"PublishedAt\" IS NULL");
 
             modelBuilder.Entity<WorkItem>()
                 .HasIndex(w => w.TaskId);

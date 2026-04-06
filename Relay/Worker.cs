@@ -47,10 +47,8 @@ namespace Relay
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
              var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
+            
             _rabbitConnection = await factory.CreateConnectionAsync(stoppingToken);
-            _rabbitChannel = await _rabbitConnection.CreateChannelAsync(null, stoppingToken);
-
-            await _rabbitChannel.QueueDeclareAsync("outbox", true, true, cancellationToken: stoppingToken);
             
             await using var connection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
             await connection.OpenAsync();
@@ -76,7 +74,7 @@ namespace Relay
         private async void OnNotify(object obj, NpgsqlNotificationEventArgs args)
         {
             await using var context = await _dbContextFactory.CreateDbContextAsync();
-            var tasks = await context.Tasks.Where(t => t.PublishedAt == null).ToArrayAsync();
+            var tasks = await context.Outbox.ToArrayAsync();
 
             if (_rabbitConnection == null)
             {
@@ -85,13 +83,24 @@ namespace Relay
 
             if (_rabbitChannel == null || _rabbitChannel.IsClosed)
             {
-                _rabbitChannel = await _rabbitConnection.CreateChannelAsync();
+                _rabbitChannel = await _rabbitConnection.CreateChannelAsync(new CreateChannelOptions(true, true));
+                await _rabbitChannel.QueueDeclareAsync("outbox", true, false);
             }
 
+            //Need to implement batching
             foreach (var task in tasks)
             {
-                await _rabbitChannel.BasicPublishAsync(string.Empty, "outbox", Encoding.UTF8.GetBytes(task.Payload));
+                try
+                {
+                    await _rabbitChannel.BasicPublishAsync(string.Empty, "outbox", Encoding.UTF8.GetBytes(task.Payload));
+                    context.Outbox.Remove(task);
+                } catch
+                {
+                    //Message failed to send across rabbit channel.
+                }
             }
+
+            await context.SaveChangesAsync();
         }
 
         #endregion

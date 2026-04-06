@@ -25,3 +25,6 @@
 - Need to batch work items to improve throughput but for the time being just sending one item across the channel at a time.
 - Need to look at how I'm setting up my queue, what should i have a x-queue-type
 
+
+6/04/26
+- Got messages working, need to fix persistence in my rabbit MQ queue, currently when i shut down the worker messages build up in the queue, this survives a restart which works as expected however when I restart the consumer and process a few messages all messages move from Ready to unacked, if I restart here the messages are lost.
