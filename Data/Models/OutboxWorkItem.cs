@@ -3,11 +3,10 @@
 namespace Data.Models
 {
     /// <summary>
-    /// Represents a unit of work with associated metadata, payload, and execution details.
+    /// Work item that exists in the outbox view
     /// </summary>
-    [Table("Tasks")]
-    public class WorkItem : IWorkItem
-    {
+    public class OutboxWorkItem : IWorkItem
+    {        
         /// <summary>
         /// Gets or sets the ordering identifier for the task.
         /// </summary>

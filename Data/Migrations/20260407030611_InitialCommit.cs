@@ -21,21 +21,16 @@ namespace Data.Migrations
                     TaskId = table.Column<Guid>(type: "uuid", nullable: false),
                     TaskType = table.Column<string>(type: "text", nullable: false),
                     ExecutionType = table.Column<string>(type: "text", nullable: false),
-                    Payload = table.Column<object>(type: "jsonb", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamptz", nullable: false),
-                    PublishedAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
+                    Payload = table.Column<string>(type: "jsonb", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()"),
+                    SentAt = table.Column<DateTime>(type: "timestamptz", nullable: false),
+                    AckedAt = table.Column<DateTime>(type: "timestamptz", nullable: false),
                     Retries = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Tasks", x => x.Id);
                 });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Tasks_Id",
-                table: "Tasks",
-                column: "Id",
-                filter: "\"PublishedAt\" IS NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Tasks_TaskId",

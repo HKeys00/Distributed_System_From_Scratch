@@ -15,7 +15,12 @@ namespace Data
         /// <summary>
         /// Gets or sets the table containing message sitting in the outbox.
         /// </summary>
-        public DbSet<WorkItem> Outbox { get; set; }
+        public DbSet<OutboxWorkItem> Outbox { get; set; }
+
+        /// <summary>
+        /// Gets or sets the view containing messages that are stale.
+        /// </summary>
+        public DbSet<StaleWorkItem> StaleTasks { get; set; }
 
         #endregion
 
@@ -42,6 +47,9 @@ namespace Data
             modelBuilder.Entity<WorkItem>()
                 .Property(w => w.CreatedAt)
                 .HasDefaultValueSql("clock_timestamp()");
+
+            modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
+            modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");
         }
 
         #endregion

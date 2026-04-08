@@ -28,3 +28,13 @@
 
 6/04/26
 - Got messages working, need to fix persistence in my rabbit MQ queue, currently when i shut down the worker messages build up in the queue, this survives a restart which works as expected however when I restart the consumer and process a few messages all messages move from Ready to unacked, if I restart here the messages are lost.
+
+7/04/26
+- Added outbox view instead of seperate table (this allows for values that still have a null published to be easily grabbed from the outbox view)
+- Added publishedAt value being updated when ack is sent by the broker
+- Fixed persistence issue now messages survive a restart once consuming starts
+
+8/04/26
+- Works quite well, I change the logic from a notification from postgres triggering a message send to having a 3 proned solution to batching and sending multiple messages, only one outbox clear process can occur at once but I currently have 3 things triggering a outbox process, a notification from postgres that a new item has been added, a timer and on start. All of these will trigger a run through of the entire outbox batching up items and sending them until there are no more in the outbox.
+- The RabbitMQ message acking is working really well, currently I have it set up so that a we get the next message sequence number then loop through the batch adding that sequence number + the index of the item in the batch to a dictionary, then when an ack is received we use the delivery tag to remove the item from the dictionary. Currently multiple is always false i don't know if there is a way to trigger multiple = true when getting an ack from the broker. Currently though this works quite well
+-Added a stale task view so that I can efficiently manage tasks that have been sent but not acked.

@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260406003506_RemovedIndex")]
-    partial class RemovedIndex
+    [Migration("20260407030641_OutboxTableAndTriggers")]
+    partial class OutboxTableAndTriggers
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -43,8 +43,10 @@ namespace Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Payload")
-                        .IsRequired()
                         .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("PublishedAt")
+                        .HasColumnType("timestamptz");
 
                     b.Property<int>("Retries")
                         .HasColumnType("integer");
@@ -60,7 +62,9 @@ namespace Data.Migrations
 
                     b.HasIndex("TaskId");
 
-                    b.ToTable("WorkItem");
+                    b.ToTable("Tasks");
+
+                    b.ToView("Outbox", (string)null);
                 });
 #pragma warning restore 612, 618
         }

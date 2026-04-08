@@ -12,7 +12,6 @@ builder.Services.AddHostedService<ImageService>();
 
 var app = builder.Build();
 
-
 app.MapGet("/", () => "Hello World!");
 
 app.Run();

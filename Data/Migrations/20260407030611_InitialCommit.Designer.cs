@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260406002658_OutboxTable")]
-    partial class OutboxTable
+    [Migration("20260407030611_InitialCommit")]
+    partial class InitialCommit
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -43,10 +43,9 @@ namespace Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Payload")
-                        .IsRequired()
                         .HasColumnType("jsonb");
 
-                    b.Property<DateTime?>("PublishedAt")
+                    b.Property<DateTime>("PublishedAt")
                         .HasColumnType("timestamptz");
 
                     b.Property<int>("Retries")
@@ -61,12 +60,11 @@ namespace Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Id")
-                        .HasFilter("\"PublishedAt\" IS NULL");
-
                     b.HasIndex("TaskId");
 
-                    b.ToTable("WorkItem");
+                    b.ToTable("Tasks");
+
+                    b.ToView("Outbox", (string)null);
                 });
 #pragma warning restore 612, 618
         }

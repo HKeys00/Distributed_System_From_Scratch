@@ -30,6 +30,9 @@ namespace Worker_Node.Services
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             var channel = await _rabbitService.GetChannelAsync();
+            //Throttling just one request per worker
+            await channel.BasicQosAsync(0, 1, false, cancellationToken);
+
             var consumer = new AsyncEventingBasicConsumer(channel);
             consumer.ReceivedAsync += PerformJobAsync;
 
@@ -46,16 +49,14 @@ namespace Worker_Node.Services
             }
         }
 
-
         /// <summary>
         /// Pretends to perform work.
         /// </summary>
         private async Task PerformJobAsync(object sender, BasicDeliverEventArgs args)
         {
-            var consumer = sender as AsyncEventingBasicConsumer;
-            if (consumer != null)
+            if (sender is AsyncEventingBasicConsumer consumer)
             {
-                await Task.Delay(5000);
+                await Task.Delay(15000);
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
             }
         }

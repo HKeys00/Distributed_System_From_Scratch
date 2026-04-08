@@ -5,7 +5,7 @@
 namespace Data.Migrations
 {
     /// <inheritdoc />
-    public partial class TasksTableTrigger : Migration
+    public partial class OutboxTableAndTriggers : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -21,6 +21,7 @@ namespace Data.Migrations
             ");
 
             migrationBuilder.Sql("CREATE TRIGGER insert_trigger AFTER INSERT ON \"Tasks\" FOR EACH ROW EXECUTE FUNCTION notify_change();");
+            migrationBuilder.Sql("CREATE VIEW Outbox AS SELECT * FROM \"Tasks\" WHERE \"AckedAt\" IS NULL AND \"SentAt\" IS NULL");
         }
 
         /// <inheritdoc />
@@ -28,6 +29,7 @@ namespace Data.Migrations
         {
             migrationBuilder.Sql("DROP TRIGGER IF EXISTS insert_trigger ON Tasks;");
             migrationBuilder.Sql("DROP FUNCTION IF EXISTS notify_change;");
+            migrationBuilder.Sql("DROP VIEW Outbox");
         }
     }
 }

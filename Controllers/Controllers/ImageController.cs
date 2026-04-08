@@ -2,10 +2,8 @@
 using Data.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Internal;
 using Shared.Constants;
 using System.Dynamic;
-using System.Text.Json;
 
 namespace Controllers.Controllers
 {
@@ -19,7 +17,7 @@ namespace Controllers.Controllers
         #region Fields
 
         private readonly IDbContextFactory<ApplicationDbContext> _dbContextFactory;
-        private readonly int _maxUnpublishedRequests = 10; //Temp value for now need to figure out a better way of sharing this across multiple controllers.
+        private readonly int _maxUnpublishedRequests = 400; //Temp value for now need to figure out a better way of sharing this across multiple controllers.
 
         #endregion
 
@@ -61,12 +59,10 @@ namespace Controllers.Controllers
             {
                 TaskId = Guid.NewGuid(),
                 TaskType = "image-compress",
-                ExecutionType = ExecutionType.CPU,
-                Payload = JsonSerializer.Serialize(payload)
+                ExecutionType = ExecutionType.CPU
             };
 
             context.Tasks.Add(item);
-            context.Outbox.Add(item);
 
             try
             {

@@ -24,7 +24,10 @@ namespace Worker_Node.Services
                 _connection = await factory.CreateConnectionAsync();
                 _channel = await _connection.CreateChannelAsync(null);
 
-                await _channel.QueueDeclareAsync("outbox", true, false);
+                await _channel.QueueDeclareAsync(queue: "outbox",
+                    durable: true, exclusive: false,
+                    autoDelete: false,
+                    arguments: new Dictionary<string, object?> { { "x-queue-type", "quorum" } });
             }
 
             return _connection;
@@ -41,7 +44,10 @@ namespace Worker_Node.Services
             if ( _channel == null || !_channel.IsOpen)
             {
                 _channel = await _connection!.CreateChannelAsync(null);
-                await _channel.QueueDeclareAsync("outbox", true, false);
+                await _channel.QueueDeclareAsync(queue: "outbox",
+                    durable: true, exclusive: false,
+                    autoDelete: false,
+                    arguments: new Dictionary<string, object?> { { "x-queue-type", "quorum" } });
             }
 
             return _channel;
