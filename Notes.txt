@@ -43,3 +43,6 @@
 - Adding the stale task view and updating the schema to include a sentAt and a ackedAt so that values with no sent at are still sitting in the outbox while those will a stale sent at and no acked at are retried later on. This has made the system a lot more robust.
 - Simulated the retry logic by ignoring an ack on every 3rd request, after a while all requests were successfully (some multiple times) and sent across. I need to implement idempotency on the client side now but the retry logic with exponential back off is working quite well.
 - Need to make task Id something more replicatable, so if a user was to send the same request twice it would result in the same id rather than creating a new GUID everytime, for now though its suitable
+
+20/04/26
+- Working on logging and idempotency, gonna make my worker a web crawler, need to implement success and conflict tables for idempotency reasons and a idempotency id that is a hash of the url .toLower with the query parameters in alphabetical order
