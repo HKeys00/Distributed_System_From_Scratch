@@ -69,6 +69,18 @@ services:
             condition: service_started
       rabbitmq:
             condition: service_healthy
+
+  dashboard:
+    build:
+        context: .
+        dockerfile: Dashboard/Dockerfile
+    container_name: dashboard
+    working_dir: /app
+    depends_on:
+      data: 
+            condition: service_started
+      rabbitmq:
+            condition: service_healthy
 volumes:
   pgdata:
 

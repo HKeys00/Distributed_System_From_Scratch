@@ -1,23 +1,17 @@
 using Data;
-using Data.Models;
+using Data.Models.Task;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using Relay.Models;
 using System.Text;
+using System.Threading.Tasks;
 using Timer = System.Timers.Timer;
 
 namespace Relay
 {
     public class Worker : BackgroundService
     {
-        #region Constructor
-
-        private const int _baselineMinutesBeforeResend = 1;
-
-        #endregion
-
         #region Fields
 
         private IConnection? _rabbitConnection;
@@ -27,12 +21,15 @@ namespace Relay
         private readonly IConfiguration _configuration;
         private readonly ILogger<Worker> _logger;
 
-        private readonly Dictionary<ulong, PendingTask> _unAckedTasks;
+        private readonly Dictionary<ulong, IWorkItem> _unAckedTasks;
         private readonly HashSet<Guid> _pendingTasks;
 
 
-        private readonly Timer _timer;
-        private bool _processing;
+        private readonly Timer _outBoxTimer;
+        private readonly Timer _staleTimer;
+
+        private bool _processingOutbox;
+        private bool _processingStale;
 
         #endregion
 
@@ -49,14 +46,21 @@ namespace Relay
             _configuration = configuration;
             _dbContextFactory = dbContextFactory;
             _logger = logger;
-            _processing = false;
 
-            _timer = new Timer(5000);
-            _timer.AutoReset = true;
-            _timer.Enabled = true;
-            _timer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
+            _processingOutbox = false;
+            _processingStale = false;
 
-            _unAckedTasks = new Dictionary<ulong, PendingTask>();
+            _outBoxTimer = new Timer(5000);
+            _outBoxTimer.AutoReset = true;
+            _outBoxTimer.Enabled = true;
+            _outBoxTimer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
+
+            _staleTimer = new Timer(10000);
+            _staleTimer.AutoReset = true;
+            _staleTimer.Enabled = true;
+            _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
+
+            _unAckedTasks = new Dictionary<ulong, IWorkItem>();
             _pendingTasks = new HashSet<Guid>();
         }
 
@@ -76,7 +80,13 @@ namespace Relay
             connection.Notification += OnNotify;
             await using (var cmd = new NpgsqlCommand("LISTEN task_channel", connection))
             {
-                await cmd.ExecuteNonQueryAsync(stoppingToken);
+                try
+                {
+                    await cmd.ExecuteNonQueryAsync(stoppingToken);
+                } catch (Exception ex)
+                {
+                    _logger.LogError("Failed to create listener for task_channel, {message}", ex.Message);
+                }
             }
 
             await OnProcessOutboxQueue();
@@ -107,20 +117,14 @@ namespace Relay
         /// message properties.</param>
         private async Task OnAckReturn(object sender, BasicAckEventArgs args)
         {
-            if (args.DeliveryTag % 5 == 0)
-            {
-                await Task.Yield();
-                return;
-            }
-
             var removed = _unAckedTasks.Remove(args.DeliveryTag, out var task);
-            if (!removed)
+            if (!removed || task == null)
             {
                 //Acking a task that has already either been re sent or marked as acked, either way ignore and keep going.
+                _logger.LogWarning("Task {tag} has already been resent or marked as acked", args.DeliveryTag);
                 await Task.Yield();
                 return;
             }
-
 
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             try
@@ -128,9 +132,10 @@ namespace Relay
                 await context.Database.BeginTransactionAsync();
                 await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"AckedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
                 await context.Database.CommitTransactionAsync();
-            } catch
+                _logger.LogInformation("Marked task with id {id} as acked", task.TaskId);
+            } catch (Exception ex)
             {
-                //Handle error.
+                _logger.LogError("Failed to ack task with id {id}, {message}", task.TaskId, ex.Message);
             } finally
             {
                 _pendingTasks.Remove(task.TaskId);
@@ -143,12 +148,12 @@ namespace Relay
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
-            if (_processing)
+            if (_processingOutbox)
             {
                 return;
             }
 
-            _processing = true;
+            _processingOutbox = true;
             await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             int page = 1;
@@ -156,101 +161,105 @@ namespace Relay
 
             while (true)
             {
-                List<OutboxWorkItem>? messages = null;
+                List<OutboxWorkItem> tasks;
+
                 try
                 {
-                    messages = await context.Outbox.Take(pageSize * page)
-                    .AsNoTracking()
-                    .ToListAsync();
-                } catch
+                    tasks = await context.Outbox.Take(pageSize * page).AsNoTracking().ToListAsync();
+                } 
+                catch (Exception ex)
                 {
                     //Database not ready yet.
+                    _logger.LogError("Error trying to read {name}, skipping process. {message}", nameof(context.Outbox), ex.Message);
                     break;
                 }
-                
 
-                if (messages == null || messages.Count == 0)
+                if (tasks.Count == 0)
                 {
                     break;
                 }
 
                 try
                 {
-                    await SendMessagesToBroker(messages);
+                    var ids = await SendMessagesToBroker(tasks);
+                    await context.Database.BeginTransactionAsync();
+                    foreach (var id in ids)
+                    {
+                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
+                    }
+                    await context.Database.CommitTransactionAsync();
                 }
                 catch (Exception ex)
                 {
+                    _logger.LogError("Unexpected error occured while sending outbox tasks, {message}", ex.Message);
                     break;
                 }
                 
                 page++;
             }
 
-            _processing = false;
+            _processingOutbox = false;
         }
 
         /// <summary>
-        /// Gets a list of stale messages that are fit to be resent to the broker.
+        /// Processes stale tasks from the database in pages, handling exceptions and ensuring only one processing
+        /// operation runs at a time.
         /// </summary>
-        /// <returns></returns>
-        private async Task<List<OutboxWorkItem>?> GetStaleMessagesToResend()
+        private async Task OnProcessStaleTasks()
         {
-            List<OutboxWorkItem>? list = null;
-
-            var staleTasks = _unAckedTasks.Where(p => p.Value.SentAt.AddMinutes(_baselineMinutesBeforeResend) < DateTime.UtcNow).ToList();
-            var staleIds = staleTasks.Select(t => t.Value.TaskId);
-
-            if (!staleIds.Any())
+            if (_processingStale)
             {
-                return null;
+                return;
             }
 
+            _processingStale = true;
             await using var context = await _dbContextFactory.CreateDbContextAsync();
-            var tasks = context.Outbox.Where(t => staleIds.Contains(t.TaskId));
-            foreach (var task in tasks)
+
+            int page = 1;
+            const int pageSize = 5;
+
+            while (true)
             {
+                List<StaleWorkItem> staleTasks;
 
-            }
-
-            return list;
-        }
-
-        /// <summary>
-        /// Sends a batch of outbox work items to the RabbitMQ broker, ensuring the channel and queue are properly
-        /// initialized.
-        /// </summary>
-        /// <param name="workItems">The list of outbox work items to be sent to the broker.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        /// <exception cref="Exception">Thrown if the connection to RabbitMQ does not exist.</exception>
-        private async Task SendMessagesToBroker(List<OutboxWorkItem> workItems)
-        {
-            await ConfirmRabbitInitialized();
-
-            var batchStartingNumber = await _rabbitChannel!.GetNextPublishSequenceNumberAsync();
-            try
-            {
-                int offset = 0; //Offset caused by existing tasks being skipped.
-                for (int i = 0; i < workItems.Count; i++)
+                try
                 {
-                    var workItem = workItems[i];
-                    if (_pendingTasks.Contains(workItem.TaskId))
+                    staleTasks = await context.StaleTasks.Take(pageSize * page).AsNoTracking().ToListAsync();
+                }
+                catch (Exception ex)
+                {
+                    //Database not ready yet.
+                    _logger.LogError("Error trying to read {name}, skipping process. {message}", nameof(context.StaleTasks), ex.Message);
+                    break;
+                }
+
+                if (staleTasks.Count == 0)
+                {
+                    break;
+                }
+
+                try
+                {
+                    var ids = await SendMessagesToBroker(staleTasks);
+                    await context.Database.BeginTransactionAsync();
+                    foreach (var id in ids)
                     {
-                        offset++;
-                        continue;    
+                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"Retries\" = \"Retries\" + 1 WHERE \"TaskId\" = {0}", id);
                     }
-
-                    _pendingTasks.Add(workItem.TaskId);
-                    _unAckedTasks.Add(batchStartingNumber + (ulong)(i - offset), new PendingTask() { SentAt = DateTime.UtcNow, TaskId = workItem.TaskId });
-                    await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox", body: Encoding.UTF8.GetBytes("AHHHH"));
+                    await context.Database.CommitTransactionAsync();
                 }
-            }
-            catch (Exception ex)
-            {
-                return;
-                //Message failed to send across rabbit channel. Potentially add to retry value
-            }
-        }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Unexpected error occured while sending stale tasks, {message}", ex.Message);
+                    break;
+                }
 
+                page++;
+            }
+
+            _processingStale = false;
+        }
+        
         /// <summary>
         /// Sends a batch of outbox work items to the RabbitMQ broker, ensuring the channel and queue are properly
         /// initialized.
@@ -258,26 +267,30 @@ namespace Relay
         /// <param name="workItems">The list of outbox work items to be sent to the broker.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
         /// <exception cref="Exception">Thrown if the connection to RabbitMQ does not exist.</exception>
-        private async Task ResendMessagesToBroker(List<OutboxWorkItem> workItems)
+        private async Task<HashSet<Guid>> SendMessagesToBroker<T>(List<T> workItems) where T : IWorkItem
         {
             await ConfirmRabbitInitialized();
+            HashSet<Guid> sentMessages = new HashSet<Guid>();
 
             var batchStartingNumber = await _rabbitChannel!.GetNextPublishSequenceNumberAsync();
-            try
+            for (int i = 0; i < workItems.Count; i++)
             {
-                for (int i = 0; i < workItems.Count; i++)
+                var workItem = workItems[i];
+                _unAckedTasks.Add(batchStartingNumber + (ulong)i, workItem);
+                try
                 {
-                    var workItem = workItems[i];
-
-                    _unAckedTasks.Add(batchStartingNumber + (ulong)i, new PendingTask() { SentAt = DateTime.UtcNow, TaskId = workItem.TaskId });
-                    await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox", body: Encoding.UTF8.GetBytes("AHHHH"));
+                    await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
+                        body: Encoding.UTF8.GetBytes("AHHHH"));
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError("Message with id {id} failed to send across rabbit channel, {message}", workItem.Id, ex.Message);
+                    continue;
+                }
+                sentMessages.Add(workItem.TaskId);
             }
-            catch (Exception ex)
-            {
-                return;
-                //Message failed to send across rabbit channel. Potentially add to retry value
-            }
+
+            return sentMessages;
         }
 
         /// <summary>

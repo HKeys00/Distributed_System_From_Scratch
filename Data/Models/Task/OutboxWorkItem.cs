@@ -1,11 +1,11 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
 
-namespace Data.Models
+namespace Data.Models.Task
 {
     /// <summary>
     /// Work item that exists in the outbox view
     /// </summary>
-    public class StaleWorkItem : IWorkItem
+    public class OutboxWorkItem : IWorkItem
     {        
         /// <summary>
         /// Gets or sets the ordering identifier for the task.

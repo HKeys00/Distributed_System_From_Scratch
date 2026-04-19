@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
 
-namespace Data.Models
+namespace Data.Models.Task
 {
     /// <summary>
     /// Represents a unit of work with associated metadata, payload, and execution details.

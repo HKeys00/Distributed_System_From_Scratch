@@ -3,6 +3,7 @@ using System;
 using Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260410061625_TaskIdUnique")]
+    partial class TaskIdUnique
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -22,38 +25,7 @@ namespace Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Data.Models.Status.Conflict", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Conflict");
-                });
-
-            modelBuilder.Entity("Data.Models.Status.Success", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("FinishedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Success");
-                });
-
-            modelBuilder.Entity("Data.Models.Task.OutboxWorkItem", b =>
+            modelBuilder.Entity("Data.Models.OutboxWorkItem", b =>
                 {
                     b.Property<long>("Id")
                         .HasColumnType("int8");
@@ -91,7 +63,7 @@ namespace Data.Migrations
                     b.ToView("outbox", (string)null);
                 });
 
-            modelBuilder.Entity("Data.Models.Task.StaleWorkItem", b =>
+            modelBuilder.Entity("Data.Models.StaleWorkItem", b =>
                 {
                     b.Property<long>("Id")
                         .HasColumnType("int8");
@@ -129,7 +101,7 @@ namespace Data.Migrations
                     b.ToView("staletasks", (string)null);
                 });
 
-            modelBuilder.Entity("Data.Models.Task.WorkItem", b =>
+            modelBuilder.Entity("Data.Models.WorkItem", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()

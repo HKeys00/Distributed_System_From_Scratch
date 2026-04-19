@@ -1,4 +1,5 @@
-﻿using Data.Models;
+﻿using Data.Models.Status;
+using Data.Models.Task;
 using Microsoft.EntityFrameworkCore;
 
 namespace Data
@@ -22,6 +23,16 @@ namespace Data
         /// </summary>
         public DbSet<StaleWorkItem> StaleTasks { get; set; }
 
+        /// <summary>
+        /// Represents the collection of Conflict entities in the database context.
+        /// </summary>
+        public DbSet<Conflict> Conflict { get; set; }
+
+        /// <summary>
+        /// Represents the database table for Success entities.
+        /// </summary>
+        public DbSet<Success> Success { get; set; }
+
         #endregion
 
         #region Constructor
@@ -42,7 +53,8 @@ namespace Data
             base.OnModelCreating(modelBuilder);
 
             modelBuilder.Entity<WorkItem>()
-                .HasIndex(w => w.TaskId);
+                .HasIndex(w => w.TaskId)
+                .IsUnique();
 
             modelBuilder.Entity<WorkItem>()
                 .Property(w => w.CreatedAt)

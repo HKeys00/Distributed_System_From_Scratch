@@ -1,5 +1,4 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -11,7 +10,7 @@ namespace Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("CREATE VIEW StaleTasks AS SELECT * FROM \"Tasks\" WHERE \"AckedAt\" IS NULL AND \"SentAt\" > clock_timestamp() + INTERVAL '1 minute'");
+            migrationBuilder.Sql("CREATE VIEW StaleTasks AS SELECT * FROM \"Tasks\" WHERE \"AckedAt\" IS NULL AND \"SentAt\" + INTERVAL '30 seconds' + (\"Retries\" * INTERVAL '1 minute') < clock_timestamp()");
         }
 
         /// <inheritdoc />
@@ -19,5 +18,5 @@ namespace Data.Migrations
         {
             migrationBuilder.Sql("DROP VIEW StaleTasks");
         }
-    }
+    }    
 }

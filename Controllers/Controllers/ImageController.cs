@@ -1,5 +1,5 @@
 ﻿using Data;
-using Data.Models;
+using Data.Models.Task;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Shared.Constants;
@@ -16,6 +16,7 @@ namespace Controllers.Controllers
     {
         #region Fields
 
+        private readonly ILogger<ImageController> _logger;
         private readonly IDbContextFactory<ApplicationDbContext> _dbContextFactory;
         private readonly int _maxUnpublishedRequests = 400; //Temp value for now need to figure out a better way of sharing this across multiple controllers.
 
@@ -26,9 +27,11 @@ namespace Controllers.Controllers
         /// <summary>
         /// Initializes a new instance of the ImageController class with the specified ingress queue service.
         /// </summary>
+        /// <param name="logger">The injected logger instance.</param>
         /// <param name="dbContextFactory">The injected db context factory.</param>
-        public ImageController(IDbContextFactory<ApplicationDbContext> dbContextFactory)
+        public ImageController(ILogger<ImageController> logger, IDbContextFactory<ApplicationDbContext> dbContextFactory)
         {
+            _logger = logger;
             _dbContextFactory = dbContextFactory;
         }
 
@@ -49,6 +52,7 @@ namespace Controllers.Controllers
             var pendingCount = await context.Outbox.CountAsync(token);
             if (pendingCount > _maxUnpublishedRequests)
             {
+                _logger.LogWarning("Failed to create task for {name}, too many requests pending.", nameof(CompressImage));
                 return StatusCode(429, "Too many requests. Please try again later.");
             }
 
@@ -70,10 +74,11 @@ namespace Controllers.Controllers
             }
             catch (Exception ex)
             {
+                _logger.LogError("Unexpected error occured. {message}", ex.Message);
                 return StatusCode(500, $"Internal server error. {ex.Message}"); //String interpolation not very performant.
             }
-                     
 
+            _logger.LogInformation("{name} Task created with id {id}", nameof(CompressImage), item.TaskId);
             return Accepted(item.TaskId);
         }
 

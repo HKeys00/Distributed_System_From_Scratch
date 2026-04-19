@@ -23,8 +23,8 @@ namespace Data.Migrations
                     ExecutionType = table.Column<string>(type: "text", nullable: false),
                     Payload = table.Column<string>(type: "jsonb", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()"),
-                    SentAt = table.Column<DateTime>(type: "timestamptz", nullable: false),
-                    AckedAt = table.Column<DateTime>(type: "timestamptz", nullable: false),
+                    SentAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
+                    AckedAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     Retries = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
