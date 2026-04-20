@@ -5,7 +5,7 @@ using Relay;
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddDbContextFactory<ApplicationDbContext>();
 builder.Services.AddHostedService<Worker>();
 
