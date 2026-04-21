@@ -1,22 +1,26 @@
 ﻿namespace Data.Models.Status
 {
     /// <summary>
-    /// Represents the successful completion of a task, including its identifier and completion time.
+    /// Audit record written when a task finishes successfully. Keeps a compact trace of
+    /// completions, keyed by idempotency id, once the row has been removed from the
+    /// active Tasks pipeline.
     /// </summary>
     public class Success
     {
         /// <summary>
-        /// The id of a task that was successfully completed.
+        /// Auto-incrementing surrogate primary key of this success record.
         /// </summary>
         public int Id {get; set;}
 
         /// <summary>
-        /// The id of a task that was successfully completed.
+        /// SHA-256 hash of the URL of the completed task. Indexed as unique so a
+        /// successful completion can be looked up quickly when deduplicating future
+        /// submissions.
         /// </summary>
         public string? IdempotencyId { get; set; }
 
         /// <summary>
-        /// The date time when the task was completed.
+        /// Timestamp the task finished. Defaults to clock_timestamp() on the database.
         /// </summary>
         public DateTime FinishedAt { get; set; }
     }

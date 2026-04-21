@@ -3,57 +3,66 @@
 namespace Data.Models.Task
 {
     /// <summary>
-    /// Work item that exists in the outbox view
+    /// Read-only projection from the 'staletasks' database view. Surfaces tasks that were
+    /// dispatched to the broker but have not yet been completed within the expected window,
+    /// making them candidates for re-dispatch by the relay.
     /// </summary>
     public class StaleWorkItem : IWorkItem
-    {        
+    {
         /// <summary>
-        /// Gets or sets the ordering identifier for the task.
+        /// Auto-incrementing surrogate primary key inherited from the Tasks table.
         /// </summary>
         [Column(TypeName = "int8")]
         public int Id { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier for the task.
+        /// Stable external identifier for the task. Correlation key between the database
+        /// and broker.
         /// </summary>
         public Guid TaskId { get; set; }
 
         /// <summary>
-        /// Gets or sets the hashed key for the task
+        /// SHA-256 hash of the normalised URL. Used as the idempotency key so duplicate
+        /// submissions of the same URL can be detected and rejected.
         /// </summary>
         public required string IdempotencyId { get; set; }
 
         /// <summary>
-        /// The url data of the work item.
+        /// The absolute URL the work item targets — re-published in the broker message body
+        /// when the relay retries the task.
         /// </summary>
         public required string Url { get; set; }
 
         /// <summary>
-        /// When this work item was created.
+        /// Timestamp the underlying Tasks row was inserted.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
-        /// The last time this work item was attempted to be sent to the broker.
+        /// Timestamp of the previous dispatch attempt. Always non-null for rows in the
+        /// stale view — that's what qualifies them as stale.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime? SentAt { get; set; }
 
         /// <summary>
-        /// The time this work item was acked as sent to the broker.
+        /// Timestamp at which a worker signalled completion. Always null for rows in the
+        /// stale view — completed tasks are excluded.
         /// </summary>
         [Column(TypeName = "timestamptz")]
-        public DateTime? AckedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
 
         /// <summary>
-        /// The time this workitem was marked as failed.
+        /// Timestamp at which the task was marked as permanently failed. Always null for
+        /// rows in the stale view — failed tasks are excluded.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime? FailedAt { get; set; }
 
         /// <summary>
-        /// The number of retries this work item has undergone.
+        /// Number of times the relay has already re-dispatched this task. Incremented on
+        /// each retry to support back-off and giving-up policies.
         /// </summary>
         public int Retries { get; set; }
     }

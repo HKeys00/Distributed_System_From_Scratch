@@ -2,55 +2,66 @@
 
 namespace Data.Models.Task
 {
+    /// <summary>
+    /// Shared shape of a work item as it flows through the Tasks table and its derived
+    /// outbox / stale views. Exposes the identifiers, payload and lifecycle timestamps that
+    /// the relay and workers rely on.
+    /// </summary>
     public interface IWorkItem
-    {        
+    {
         /// <summary>
-        /// Gets or sets the ordering identifier for the task.
+        /// Auto-incrementing surrogate primary key. Used for insertion ordering when paging
+        /// through tasks — not exposed outside the system.
         /// </summary>
         [Column(TypeName = "int8")]
         public int Id { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier for the task.
+        /// Stable external identifier for the task. Used when updating row state and as the
+        /// correlation key between the database and broker.
         /// </summary>
         public Guid TaskId { get; set; }
 
         /// <summary>
-        /// Gets or sets the hashed key for the task
+        /// SHA-256 hash of the normalised URL. Used as the idempotency key so duplicate
+        /// submissions of the same URL can be detected and rejected.
         /// </summary>
         public string IdempotencyId { get; set; }
 
         /// <summary>
-        /// The url data of the work item.
+        /// The absolute URL the work item targets — this is what the crawler will fetch.
         /// </summary>
         public string Url { get; set; }
 
         /// <summary>
-        /// When this work item was created.
+        /// Timestamp the row was first inserted into the Tasks table.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
-        /// The last time this work item was attempted to be sent to the broker.
+        /// Timestamp of the most recent attempt by the relay to publish this task to the
+        /// broker. Null while the task is still sitting in the outbox.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime? SentAt { get; set; }
 
         /// <summary>
-        /// The time this work item was acked as sent to the broker.
+        /// Timestamp at which a worker signalled that the task was fully processed. Null
+        /// until completion.
         /// </summary>
         [Column(TypeName = "timestamptz")]
-        public DateTime? AckedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
 
         /// <summary>
-        /// The time this workitem was marked as failed.
+        /// Timestamp at which the task was marked as permanently failed and will no longer
+        /// be retried. Null while the task is still eligible for processing.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime? FailedAt { get; set; }
 
         /// <summary>
-        /// The number of retries this work item has undergone.
+        /// Number of times the relay has re-dispatched this task after it went stale.
         /// </summary>
         public int Retries { get; set; }
     }

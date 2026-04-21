@@ -3,57 +3,64 @@
 namespace Data.Models.Task
 {
     /// <summary>
-    /// Work item that exists in the outbox view
+    /// Read-only projection from the 'outbox' database view. Surfaces tasks that have not
+    /// yet been successfully published to the broker, so the relay can dispatch them.
     /// </summary>
     public class OutboxWorkItem : IWorkItem
-    {        
+    {
         /// <summary>
-        /// Gets or sets the ordering identifier for the task.
+        /// Auto-incrementing surrogate primary key inherited from the Tasks table. Used for
+        /// insertion ordering when the relay pages through the outbox.
         /// </summary>
         [Column(TypeName = "int8")]
         public int Id { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier for the task.
+        /// Stable external identifier for the task. Correlation key between the database
+        /// and broker.
         /// </summary>
         public Guid TaskId { get; set; }
 
         /// <summary>
-        /// Gets or sets the hashed key for the task
+        /// SHA-256 hash of the normalised URL. Used as the idempotency key so duplicate
+        /// submissions of the same URL can be detected and rejected.
         /// </summary>
         public required string IdempotencyId { get; set; }
 
         /// <summary>
-        /// The url data of the work item.
+        /// The absolute URL the work item targets — published in the broker message body.
         /// </summary>
         public required string Url { get; set; }
 
         /// <summary>
-        /// When this work item was created.
+        /// Timestamp the underlying Tasks row was inserted.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
-        /// The last time this work item was attempted to be sent to the broker.
+        /// Timestamp of the most recent attempt by the relay to publish this task. Always
+        /// null for rows appearing in the outbox view.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime? SentAt { get; set; }
 
         /// <summary>
-        /// The time this work item was acked as sent to the broker.
+        /// Timestamp at which a worker signalled that the task was fully processed. Always
+        /// null for rows appearing in the outbox view.
         /// </summary>
         [Column(TypeName = "timestamptz")]
-        public DateTime? AckedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
 
         /// <summary>
-        /// The time this workitem was marked as failed.
+        /// Timestamp at which the task was marked as permanently failed. Always null for
+        /// rows appearing in the outbox view.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime? FailedAt { get; set; }
 
         /// <summary>
-        /// The number of retries this work item has undergone.
+        /// Number of times the task has been re-dispatched after going stale.
         /// </summary>
         public int Retries { get; set; }
     }
