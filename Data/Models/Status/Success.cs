@@ -8,7 +8,7 @@
         /// <summary>
         /// The id of a task that was successfully completed.
         /// </summary>
-        public Guid Id { get; set; }
+        public string? IdempotencyId { get; set; }
 
         /// <summary>
         /// The date time when the task was completed.

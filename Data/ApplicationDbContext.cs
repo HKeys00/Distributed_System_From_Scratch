@@ -26,12 +26,12 @@ namespace Data
         /// <summary>
         /// Represents the collection of Conflict entities in the database context.
         /// </summary>
-        public DbSet<Conflict> Conflict { get; set; }
+        public DbSet<Conflict> Conflicts { get; set; }
 
         /// <summary>
         /// Represents the database table for Success entities.
         /// </summary>
-        public DbSet<Success> Success { get; set; }
+        public DbSet<Success> Successes { get; set; }
 
         #endregion
 
@@ -59,6 +59,14 @@ namespace Data
             modelBuilder.Entity<WorkItem>()
                 .Property(w => w.CreatedAt)
                 .HasDefaultValueSql("clock_timestamp()");
+
+            modelBuilder.Entity<Success>()
+            .HasIndex(s => s.IdempotencyId)
+            .IsUnique();
+
+            modelBuilder.Entity<Success>()
+            .Property(s => s.FinishedAt)
+            .HasDefaultValueSql("clock_timestamp()");
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");
