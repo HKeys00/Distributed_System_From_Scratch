@@ -8,6 +8,11 @@
         /// <summary>
         /// The id of a task that was successfully completed.
         /// </summary>
+        public int Id {get; set;}
+
+        /// <summary>
+        /// The id of a task that was successfully completed.
+        /// </summary>
         public string? IdempotencyId { get; set; }
 
         /// <summary>

@@ -1,7 +1,9 @@
 using Data;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client.Events;
+using Shared.DTOs;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Worker_Node.Services
@@ -113,9 +115,22 @@ namespace Worker_Node.Services
                 return;
             }
 
-            
-            var url = Encoding.UTF8.GetString(args.Body.ToArray());
-            _logger.LogInformation("Received crawl job for {url}", url);
+
+            var job = JsonSerializer.Deserialize<CrawlMessage>(args.Body.Span);
+            if (job == null)
+            {
+                _logger.LogError("Failed to deserialize message, {message}", Encoding.UTF8.GetString(args.Body.ToArray()));
+                return;
+            }
+
+            _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            try
+            {
+                context.Success
+            }
+
 
             try
             {

@@ -68,6 +68,10 @@ namespace Data
             .Property(s => s.FinishedAt)
             .HasDefaultValueSql("clock_timestamp()");
 
+            modelBuilder.Entity<Conflict>()
+            .Property(c => c.FailedAt)
+            .HasDefaultValueSql("clock_timestamp()");
+
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");
         }
