@@ -60,6 +60,11 @@ namespace Data
                 .Property(w => w.CreatedAt)
                 .HasDefaultValueSql("clock_timestamp()");
 
+            modelBuilder.Entity<WorkItem>()
+                .HasIndex(w => w.IdempotencyId)
+                .IsUnique()
+                .HasFilter("\"PublishedAt == NULL\"");
+
             modelBuilder.Entity<Success>()
             .HasIndex(s => s.IdempotencyId)
             .IsUnique();

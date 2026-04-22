@@ -56,7 +56,8 @@ namespace Controllers.Controllers
                 IdempotencyId = Url.HashUrl()
             };
 
-            context.Tasks.Add(item);
+            var exists = await context.Successes.AnyAsync(s => s.IdempotencyId == item.IdempotencyId);
+            if (!exists) context.Tasks.Add(item);
 
             try
             {

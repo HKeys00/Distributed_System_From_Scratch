@@ -23,8 +23,8 @@ while (true)
         using var db = new ApplicationDbContext(optionsBuilder.Options);
 
         int outboxCount = await db.Outbox.CountAsync();
-        int conflicts = await db.Conflict.CountAsync();
-        int successes = await db.Success.CountAsync();
+        int conflicts = await db.Conflicts.CountAsync();
+        int successes = await db.Successes.CountAsync();
 
         // Queue Depth
         int queueDepth = await GetRabbitQueueDepth(rabbitHost, rabbitPort, rabbitUser, rabbitPass, queueName);

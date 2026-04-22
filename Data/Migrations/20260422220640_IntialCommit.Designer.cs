@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260420224929_WebCrawlerFields")]
-    partial class WebCrawlerFields
+    [Migration("20260422220640_IntialCommit")]
+    partial class IntialCommit
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -33,27 +33,46 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime>("FailedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("clock_timestamp()");
+
+                    b.Property<string>("IdempotencyId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Id");
 
-                    b.ToTable("Conflict");
+                    b.ToTable("Conflicts");
                 });
 
             modelBuilder.Entity("Data.Models.Status.Success", b =>
                 {
-                    b.Property<Guid>("Id")
+                    b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("FinishedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("clock_timestamp()");
+
+                    b.Property<string>("IdempotencyId")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
-                    b.ToTable("Success");
+                    b.HasIndex("IdempotencyId")
+                        .IsUnique();
+
+                    b.ToTable("Successes");
                 });
 
             modelBuilder.Entity("Data.Models.Task.OutboxWorkItem", b =>
@@ -61,18 +80,15 @@ namespace Data.Migrations
                     b.Property<long>("Id")
                         .HasColumnType("int8");
 
-                    b.Property<DateTime?>("AckedAt")
-                        .HasColumnType("timestamptz");
-
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamptz");
-
-                    b.Property<DateTime?>("FailedAt")
                         .HasColumnType("timestamptz");
 
                     b.Property<string>("IdempotencyId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamptz");
 
                     b.Property<int>("Retries")
                         .HasColumnType("integer");
@@ -99,18 +115,15 @@ namespace Data.Migrations
                     b.Property<long>("Id")
                         .HasColumnType("int8");
 
-                    b.Property<DateTime?>("AckedAt")
-                        .HasColumnType("timestamptz");
-
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamptz");
-
-                    b.Property<DateTime?>("FailedAt")
                         .HasColumnType("timestamptz");
 
                     b.Property<string>("IdempotencyId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamptz");
 
                     b.Property<int>("Retries")
                         .HasColumnType("integer");
@@ -140,20 +153,17 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
-                    b.Property<DateTime?>("AckedAt")
-                        .HasColumnType("timestamptz");
-
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
                         .HasDefaultValueSql("clock_timestamp()");
 
-                    b.Property<DateTime?>("FailedAt")
-                        .HasColumnType("timestamptz");
-
                     b.Property<string>("IdempotencyId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamptz");
 
                     b.Property<int>("Retries")
                         .HasColumnType("integer");

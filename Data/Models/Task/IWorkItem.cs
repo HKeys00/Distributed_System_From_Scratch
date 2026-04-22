@@ -47,18 +47,10 @@ namespace Data.Models.Task
         public DateTime? SentAt { get; set; }
 
         /// <summary>
-        /// Timestamp at which a worker signalled that the task was fully processed. Null
-        /// until completion.
+        /// Timestamp at which the task was marked as published to the message broker
         /// </summary>
         [Column(TypeName = "timestamptz")]
-        public DateTime? CompletedAt { get; set; }
-
-        /// <summary>
-        /// Timestamp at which the task was marked as permanently failed and will no longer
-        /// be retried. Null while the task is still eligible for processing.
-        /// </summary>
-        [Column(TypeName = "timestamptz")]
-        public DateTime? FailedAt { get; set; }
+        public DateTime? PublishedAt {get; set;}
 
         /// <summary>
         /// Number of times the relay has re-dispatched this task after it went stale.
