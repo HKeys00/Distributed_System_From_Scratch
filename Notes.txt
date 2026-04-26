@@ -46,3 +46,10 @@
 
 20/04/26
 - Working on logging and idempotency, gonna make my worker a web crawler, need to implement success and conflict tables for idempotency reasons and a idempotency id that is a hash of the url .toLower with the query parameters in alphabetical order
+
+27/04/26
+- Remodelling the database to account for failures and idempotency
+- Includes the addition of a retriable view for conflicts that haven't hit the limit of 5 retries yet, having a static number of 5
+doesn't sit very well with me but I can look to make it task dependent later on, need to be careful not using views as a cructch
+- Scratch the retriable view instead i'm going to shift the stale task view purely to check for dead workers (or possibly non acked messages) and remove the retry timer aspect from it,
+not sure how that'll work with non acked messages, maybe I set the sentAt when the message is acked that wouldn't work because the message would perma stay in the inbox

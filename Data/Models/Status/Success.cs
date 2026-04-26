@@ -1,4 +1,5 @@
-﻿namespace Data.Models.Status
+﻿using System.ComponentModel.DataAnnotations.Schema;
+namespace Data.Models.Status
 {
     /// <summary>
     /// Audit record written when a task finishes successfully. Keeps a compact trace of
@@ -22,6 +23,7 @@
         /// <summary>
         /// Timestamp the task finished. Defaults to clock_timestamp() on the database.
         /// </summary>
+        [Column(TypeName = "timestamptz")]
         public DateTime FinishedAt { get; set; }
     }
 }

@@ -53,6 +53,12 @@ namespace Data.Models.Task
         public DateTime? PublishedAt {get; set;}
 
         /// <summary>
+        /// Timestamp at which the task is marked to send again.
+        /// </summary>
+        [Column(TypeName = "timestamptz")]
+        public DateTime? NextAttemptAt {get; set;}
+
+        /// <summary>
         /// Number of times the relay has already re-dispatched this task. Incremented on
         /// each retry to support back-off and giving-up policies.
         /// </summary>

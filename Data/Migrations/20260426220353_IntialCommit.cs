@@ -18,9 +18,11 @@ namespace Data.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    TaskId = table.Column<Guid>(type: "uuid", nullable: false),
                     IdempotencyId = table.Column<string>(type: "text", nullable: false),
-                    FailedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "clock_timestamp()"),
-                    Reason = table.Column<string>(type: "text", nullable: false)
+                    FailedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()"),
+                    Reason = table.Column<string>(type: "text", nullable: false),
+                    Attempt = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -34,7 +36,7 @@ namespace Data.Migrations
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     IdempotencyId = table.Column<string>(type: "text", nullable: true),
-                    FinishedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "clock_timestamp()")
+                    FinishedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()")
                 },
                 constraints: table =>
                 {
@@ -53,6 +55,7 @@ namespace Data.Migrations
                     CreatedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()"),
                     SentAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     PublishedAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
+                    NextAttemptAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     Retries = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
@@ -61,8 +64,19 @@ namespace Data.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_Conflicts_IdempotencyId",
+                table: "Conflicts",
+                column: "IdempotencyId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Successes_IdempotencyId",
                 table: "Successes",
+                column: "IdempotencyId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Tasks_IdempotencyId",
+                table: "Tasks",
                 column: "IdempotencyId",
                 unique: true);
 

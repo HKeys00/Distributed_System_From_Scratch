@@ -62,8 +62,7 @@ namespace Data
 
             modelBuilder.Entity<WorkItem>()
                 .HasIndex(w => w.IdempotencyId)
-                .IsUnique()
-                .HasFilter("\"PublishedAt == NULL\"");
+                .IsUnique();
 
             modelBuilder.Entity<Success>()
             .HasIndex(s => s.IdempotencyId)
@@ -76,6 +75,9 @@ namespace Data
             modelBuilder.Entity<Conflict>()
             .Property(c => c.FailedAt)
             .HasDefaultValueSql("clock_timestamp()");
+
+            modelBuilder.Entity<Conflict>()
+            .HasIndex(c => c.IdempotencyId);
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");

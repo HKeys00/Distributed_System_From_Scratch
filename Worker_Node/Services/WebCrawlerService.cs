@@ -125,22 +125,22 @@ namespace Worker_Node.Services
 
             _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
 
-            await using var context = await _dbContextFactory.CreateDbContextAsync();
-            try
-            {
-                context.Success
-            }
+            // await using var context = await _dbContextFactory.CreateDbContextAsync();
+            // try
+            // {
+            //     context.Success
+            // }
 
 
-            try
-            {
-                var childUrls = await CrawlAsync(url, CancellationToken.None);
-                _logger.LogInformation("Crawl of {url} found {count} child urls", url, childUrls.Length);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("Failed to crawl {url}: {message}", url, ex.Message);
-            }
+            // try
+            // {
+            //     var childUrls = await CrawlAsync(url, CancellationToken.None);
+            //     _logger.LogInformation("Crawl of {url} found {count} child urls", url, childUrls.Length);
+            // }
+            // catch (Exception ex)
+            // {
+            //     _logger.LogError("Failed to crawl {url}: {message}", url, ex.Message);
+            // }
 
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }

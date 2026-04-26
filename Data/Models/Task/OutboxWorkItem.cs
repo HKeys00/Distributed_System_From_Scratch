@@ -52,6 +52,12 @@ namespace Data.Models.Task
         public DateTime? PublishedAt {get; set;}
 
         /// <summary>
+        /// Timestamp at which the task is marked to send again.
+        /// </summary>
+        [Column(TypeName = "timestamptz")]
+        public DateTime? NextAttemptAt {get; set;}
+
+        /// <summary>
         /// Number of times the task has been re-dispatched after going stale.
         /// </summary>
         public int Retries { get; set; }

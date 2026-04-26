@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260422220759_ViewsAndTriggers")]
-    partial class ViewsAndTriggers
+    [Migration("20260426220353_IntialCommit")]
+    partial class IntialCommit
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -33,9 +33,12 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("Attempt")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("FailedAt")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
+                        .HasColumnType("timestamptz")
                         .HasDefaultValueSql("clock_timestamp()");
 
                     b.Property<string>("IdempotencyId")
@@ -46,7 +49,12 @@ namespace Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyId");
 
                     b.ToTable("Conflicts");
                 });
@@ -61,7 +69,7 @@ namespace Data.Migrations
 
                     b.Property<DateTime>("FinishedAt")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
+                        .HasColumnType("timestamptz")
                         .HasDefaultValueSql("clock_timestamp()");
 
                     b.Property<string>("IdempotencyId")
@@ -86,6 +94,9 @@ namespace Data.Migrations
                     b.Property<string>("IdempotencyId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamptz");
 
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
@@ -121,6 +132,9 @@ namespace Data.Migrations
                     b.Property<string>("IdempotencyId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamptz");
 
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
@@ -162,6 +176,9 @@ namespace Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("timestamptz");
+
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
 
@@ -179,6 +196,9 @@ namespace Data.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyId")
+                        .IsUnique();
 
                     b.HasIndex("TaskId")
                         .IsUnique();

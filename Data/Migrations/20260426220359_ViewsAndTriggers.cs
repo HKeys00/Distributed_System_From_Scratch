@@ -10,7 +10,7 @@ namespace Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"
+             migrationBuilder.Sql(@"
                 CREATE OR REPLACE FUNCTION notify_change()
                 RETURNS trigger AS $$
                 BEGIN
@@ -21,13 +21,8 @@ namespace Data.Migrations
             ");
 
             migrationBuilder.Sql("CREATE TRIGGER insert_trigger AFTER INSERT ON \"Tasks\" FOR EACH ROW EXECUTE FUNCTION notify_change();");
-            
-            migrationBuilder.Sql("CREATE VIEW Outbox AS SELECT * FROM \"Tasks\" WHERE \"PublishedAt\" IS NULL AND \"SentAt\" IS NULL");
-            migrationBuilder.Sql("CREATE VIEW StaleTasks AS SELECT * FROM \"Tasks\" WHERE \"PublishedAt\" IS NULL AND \"SentAt\" + INTERVAL '30 seconds' + (\"Retries\" * INTERVAL '1 minute') < clock_timestamp()");
-            migrationBuilder.Sql("CREATE VIEW RetriableConflicts AS SELECT t.\"TaskId\", t.\"IdempotencyId\", t.\"Retries\" FROM "\"Tasks"" t
-                WHERE t.""Retries"" < 5
-                  AND EXISTS (SELECT 1 FROM ""Conflicts"" c WHERE c.""IdempotencyId"" = t.""IdempotencyId"");
-            ");
+            migrationBuilder.Sql("CREATE VIEW Outbox AS SELECT * FROM \"Tasks\" WHERE \"SentAt\" IS NULL AND \"NextAttemptAt\" <= clock_timestamp() AND \"Retries\" < 5 AND NOT EXISTS (SELECT 1 FROM \"Successes\" WHERE \"IdempotencyId\" = \"Tasks\".\"IdempotencyId\")");
+            migrationBuilder.Sql("CREATE VIEW StaleTasks AS SELECT * FROM \"Tasks\" WHERE \"SentAt\" IS NOT NULL AND \"SentAt\" < clock_timestamp() - INTERVAL '120 seconds' AND NOT EXISTS (SELECT 1 FROM \"Successes\" WHERE \"IdempotencyId\" = \"Tasks\".\"IdempotencyId\") AND NOT EXISTS (SELECT 1 FROM \"Conflicts\" WHERE \"TaskId\" = \"Tasks\".\"TaskId\" AND \"Attempt\" = \"Tasks\".\"Retries\")");
         }
 
         /// <inheritdoc />
@@ -37,7 +32,6 @@ namespace Data.Migrations
             migrationBuilder.Sql("DROP FUNCTION IF EXISTS notify_change;");
             migrationBuilder.Sql("DROP VIEW Outbox");
             migrationBuilder.Sql("DROP VIEW StaleTasks");
-            migrationBuilder.Sql("DROP VIEW RetriableConflicts");
         }
     }
 }
