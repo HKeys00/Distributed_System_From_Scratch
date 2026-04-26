@@ -130,7 +130,7 @@ namespace Relay
             try
             {
                 await context.Database.BeginTransactionAsync();
-                await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"AckedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
+                await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
                 await context.Database.CommitTransactionAsync();
                 _logger.LogInformation("Marked task with id {id} as acked", task.TaskId);
             } catch (Exception ex)

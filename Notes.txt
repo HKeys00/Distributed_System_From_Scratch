@@ -3,16 +3,26 @@
 - The architecture involves requests flowing towards a controller on the ASP.NET node I've set up, this controller will then try to place that request on the Ingress queue, this queue has a set max length to avoid the node being overwhelmed with requests, if there's not room on the queue the controller responds with a 429 error code or 202 status code if the task was added to the queue, I used a channel as my queue because it works very well for the publisher consumer pattern I'm setting up
 - Next I created a work item dispatcher which will monitor this queue and then based on the execution type (CPU or IO bound) will pass that work item to the respective CPU bound or IO bound worker queue, these queues have different size constraints due to the nature of the work they perform. 
 - If the dispatcher attempts to pass this work item to a queue that is full, the request will be dropped and logged, this isn't a permanent solution but for simplicity that what I've gone for for the time being.
+- The whole system lives in process — channels are in-memory, workers are tasks on the same node. Fine as a starting point but no durability story; a crash drops every in-flight request on the floor.
+- Already smelling the limits: the 429 on a full queue is honest, but "drop and log" on the dispatcher's full worker queue is silent data loss for accepted work. The 202 is starting to feel like a lie.
 
 30/03/26
 - And now my architecture has completely shifted again
 - Now i'm using the outbox pattern with a postgres database to store items, and a relayer service will push those tasks in batches to my RabbitMQ system that will then publish those messages to the worker nodes 
+- The trigger for the rewrite was the silent-loss problem from the 26th — once a 202 goes out, the task has to be durable, and an in-process channel can't promise that
+- Postgres becomes the source of truth, RabbitMQ becomes a notification channel, the relay bridges them. This decouples accept-the-task from execute-the-task, which is the whole point
+- The "atomically write task + outbox row in one transaction" property is what makes the 202 honest. No more lying.
 
 1/04/26
 - If I'm to implement a lease based approach for grabbing tasks, I'll need to implement a fencing token so that any nodes that grab a task, pause, lose the lease and then try to complete the task are met with an error
+- Classic split-brain scenario — worker A grabs lease, GC pauses for 30s, lease expires, worker B grabs the same task. Without a fencing token A wakes up and happily writes results, clobbering B's work
+- Token is monotonic, attached to the task on lease acquisition, checked on every state-changing write. Stale workers get rejected at the DB layer
+- Filing this for later — won't matter until I have real lease management, which is post-Phase-1
 
 2/04/26
 - Need to fix cannot load library libgssapi_krb5 error, working fine but still annoying
+- Npgsql trying to negotiate Kerberos auth even though I'm on plain password — missing the GSSAPI lib on this machine
+- Annoying but cosmetic, doesn't actually break anything
 
 3/04/26
 - Finally got the outbox flow of my application working, a controller can upload a task to the database, the relay worker is then notified of that insert operation. Now the next step is for the relay worker to publish that event to RabbitMQ and then update the status of the task to published, this all needs to occur atomically so that if power was lost between these steps the system wouldn't be left in a weird state.
@@ -20,32 +30,68 @@
 - Need a way of managing different max number of unpublished counts across different controllers, should the number of allowed pending tasks be task type dependent?
 - Need to implement a singleton service for creating and holding the relay rabbit mq connection, since it seems that it's expensive to create and destroy one constantly.
 - Seems like the goal is to create a connection per application lifetime and then use a channel pool
+- The "atomically publish + update" requirement is the hardest part — can't actually do it atomically because RabbitMQ and Postgres aren't in the same transaction. Have to settle for at-least-once: publish first, then update. If we crash between, we republish on recovery. Workers handle the duplicate.
+- Backpressure based on outbox depth feels right — if the relay is keeping up, depth stays low; if it's not, controllers start 429ing. The DB becomes the load signal.
 
 4/04/26
 - Need to batch work items to improve throughput but for the time being just sending one item across the channel at a time.
 - Need to look at how I'm setting up my queue, what should i have a x-queue-type
-
+- Quorum vs classic — quorum is the modern default for durability, replicated across nodes. Worth the overhead for anything production-shaped.
+- Single-message publish is doing a network round trip per task, which is going to cap throughput hard. Batching is on the list but want correctness first.
 
 6/04/26
 - Got messages working, need to fix persistence in my rabbit MQ queue, currently when i shut down the worker messages build up in the queue, this survives a restart which works as expected however when I restart the consumer and process a few messages all messages move from Ready to unacked, if I restart here the messages are lost.
+- Auto-ack was on. Consumer was acking on receive, not on completion. Restart mid-batch threw away every message that had been delivered but not yet processed.
+- Classic at-most-once vs at-least-once mistake. Want at-least-once + idempotent workers, not auto-ack and pray.
 
 7/04/26
 - Added outbox view instead of seperate table (this allows for values that still have a null published to be easily grabbed from the outbox view)
 - Added publishedAt value being updated when ack is sent by the broker
 - Fixed persistence issue now messages survive a restart once consuming starts
+- The view-instead-of-table choice is interesting — the "outbox" in the classic pattern exists because the events are semantically distinct from the rows that produced them. In my case the event IS "this task needs dispatching," which is already encoded in the task row. The view collapses the redundancy.
+- Trade-off: lose the ability to have arbitrary event payloads, but gain a single source of truth and simpler transactional semantics. For this workload it's the right call.
+- Needs a partial index — `WHERE publishedAt IS NULL` — otherwise the relay full-scans the tasks table on every poll. Partial index stays tiny because most rows don't match.
 
 8/04/26
 - Works quite well, I change the logic from a notification from postgres triggering a message send to having a 3 proned solution to batching and sending multiple messages, only one outbox clear process can occur at once but I currently have 3 things triggering a outbox process, a notification from postgres that a new item has been added, a timer and on start. All of these will trigger a run through of the entire outbox batching up items and sending them until there are no more in the outbox.
 - The RabbitMQ message acking is working really well, currently I have it set up so that a we get the next message sequence number then loop through the batch adding that sequence number + the index of the item in the batch to a dictionary, then when an ack is received we use the delivery tag to remove the item from the dictionary. Currently multiple is always false i don't know if there is a way to trigger multiple = true when getting an ack from the broker. Currently though this works quite well
--Added a stale task view so that I can efficiently manage tasks that have been sent but not acked.
+- Added a stale task view so that I can efficiently manage tasks that have been sent but not acked.
+- Three triggers feels like belt + braces but they cover different failure modes — notification for low latency, timer for missed notifications, on-start for crash recovery. Each one alone has a hole.
+- Mutex on the outbox process is critical — without it, three triggers firing simultaneously means three publishers fighting over the same rows, all publishing duplicates
+- The `multiple=true` ack confused me too — broker sends it when it's confirming a contiguous range up to delivery tag N. Useful for batched confirms but I haven't seen the broker actually use it yet. Worth investigating later.
 
 10/04/26
 - Adding the stale task view and updating the schema to include a sentAt and a ackedAt so that values with no sent at are still sitting in the outbox while those will a stale sent at and no acked at are retried later on. This has made the system a lot more robust.
 - Simulated the retry logic by ignoring an ack on every 3rd request, after a while all requests were successfully (some multiple times) and sent across. I need to implement idempotency on the client side now but the retry logic with exponential back off is working quite well.
 - Need to make task Id something more replicatable, so if a user was to send the same request twice it would result in the same id rather than creating a new GUID everytime, for now though its suitable
+- The "drop every 3rd ack" test is a poor man's chaos harness — exactly the kind of thing the project's invariants framing wants me to formalise. Needs to graduate into a proper test suite.
+- "Some multiple times" is the at-least-once delivery showing through. Without idempotency on the worker side, this becomes data corruption. The deterministic task ID is the first half of the fix.
 
 20/04/26
 - Working on logging and idempotency, gonna make my worker a web crawler, need to implement success and conflict tables for idempotency reasons and a idempotency id that is a hash of the url .toLower with the query parameters in alphabetical order
+- Crawler is a good fit for this platform — natural fan-out, rich failure modes, real idempotency requirement (don't refetch), cheap to fail a million times
+- The idempotency key as `hash(toLower(url) + sorted(params))` covers the common cases but skips a lot — trailing slashes, fragments, www-prefixes, percent-encoding normalisation, session IDs in query strings. Calling out the limitation now so it's a known gap, not a surprise
+- Scope of idempotency: 24 hour window, kept in a `successes` table. Recrawl after that. Means recrawl isn't automatic — something has to resubmit. Filing that as a future problem.
+
+21/04/26
+- Worked through the canonicalization gap properly — "hash the URL" hides a lot of decisions. Lowercasing the host is right (host is case-insensitive). Lowercasing the path is wrong (paths are case-sensitive on most servers). Sticking with lowercasing the whole URL for now because the targets I care about don't have case-sensitive paths, but documenting it as a known incorrectness.
+- Decided uniqueness has to be enforced at the DB, not in the controller. App-level "check then insert" loses the race when two requests arrive simultaneously — both see no existing row, both insert, both publish, both fetch. Polite crawler suddenly impolite.
+- Solution: partial unique index on `tasks(idempotency_key) WHERE not-yet-terminal`, controller does INSERT ... ON CONFLICT DO NOTHING. DB serialises the race for free.
+- Two-layer enforcement: partial unique on tasks for concurrent in-flight, app check against successes for the 24h cooldown. Different jobs, both needed.
+
+23/04/26
+- Working through the worker's completion path — same transactional outbox discipline as submit, but mirrored
+- Worker has to: insert success row, insert N child tasks (each with own idempotency key), update parent task state. All three in one DB transaction. Broker ack happens AFTER commit.
+- Crash analysis: between fetch and DB commit, redelivery + idempotency check makes it a no-op. Between DB commit and broker ack, redelivery + idempotency hits the success row, worker just acks. No lost work, no duplicate side effects.
+- This is the property the chaos harness needs to assert — SIGKILL the worker at any point in the completion path, end state is "exactly one success row + correct child tasks + no orphans"
+- Realised the broker ack is an *event*, not a *state*. Don't persist it on the task row. The DB tracks "was the work done" via the success row, the broker tracks "did this delivery complete" via its own state. Two separate concerns, don't conflate.
+
+25/04/26
+- Per-domain rate limiting is going to be the sneaky-hard problem at scale
+- Local token bucket per worker means N workers × limit = effective rate. Polite per-worker, impolite in aggregate.
+- Three real options: shared bucket in Redis (every fetch hits Redis, makes it a correctness dependency), per-domain queue with single consumer (doesn't scale to crawl's long tail of domains), domain-partitioned workers via consistent hashing (elegant but rebalancing on failure is its own problem)
+- Probably going local-bucket-per-worker for Phase 1, accept the impoliteness, fix properly when scaling
+- Big interaction with stale-task threshold: if a task is legitimately waiting 30s for a domain token and the reaper threshold is 20s, healthy tasks get redelivered and the target gets hammered. Threshold has to dominate longest realistic task wait.
 
 27/04/26
 - Remodelling the database to account for failures and idempotency
@@ -53,3 +99,12 @@
 doesn't sit very well with me but I can look to make it task dependent later on, need to be careful not using views as a cructch
 - Scratch the retriable view instead i'm going to shift the stale task view purely to check for dead workers (or possibly non acked messages) and remove the retry timer aspect from it,
 not sure how that'll work with non acked messages, maybe I set the sentAt when the message is acked that wouldn't work because the message would perma stay in the inbox
+- The retriable-view design had a real problem: a task in retry would match both the retry view AND the stale view. Relay polls both, publishes twice. Exact failure mode the invariants are supposed to catch.
+- Root cause: trying to partition a 2D state space (broker-confirmed? worker-finished?) into 3 non-overlapping views. Doesn't work, regions overlap.
+- Fix: explicit `nextAttemptAt` column on tasks. Outbox view becomes "sentAt null AND retry_count < 5 AND nextAttemptAt <= now() AND no success row". Brand new tasks, retry-after-failure, and scheduled tasks all collapse into the same view membership. Phase 3 scheduling falls out for free.
+- Stale view shrinks to one job: detect dead workers. Single threshold, doesn't scale with retries. Tuned to "longer than longest realistic crawl" — has to dominate the per-domain rate limit wait.
+- Worker failure transaction: insert conflict row, increment retry_count on task, set nextAttemptAt = now() + backoff(retry_count), null sentAt. All atomic. Outbox picks it up after backoff window.
+- Reaper failure transaction (when retries hit 5): insert into DLQ, set terminal flag on task, all atomic. Otherwise: republish, increment retries, update sentAt.
+- Stale view needs an "attempt-scoped no conflict" clause — naive `NOT EXISTS conflict` excludes any task that's ever failed even if currently in-flight on a later attempt. Solution: `attempt` column on conflicts matching retry_count at time of failure, stale view checks `NOT EXISTS conflict WHERE attempt = current retry_count`.
+- State machine is now non-overlapping: pending publish (in outbox), in-flight (sentAt set, no conflict for current attempt, not yet stale), presumed-dead (in stale view), just-failed (back in outbox via nextAttemptAt), terminal success, terminal failure. Every task in exactly one state.
+- Lost-publish detection: stale view catches it for free, treated as a dead worker, retried. Incorrect framing but correct behaviour. Phase 2 will fix properly with publisher confirms.

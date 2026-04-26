@@ -1,3 +1,4 @@
+using Controllers.Requests;
 using Data;
 using Data.Models.Task;
 using Microsoft.AspNetCore.Mvc;
@@ -39,7 +40,7 @@ namespace Controllers.Controllers
         #region Methods
 
         [HttpPost]
-        public async Task<IActionResult> Crawl([FromBody] string Url, CancellationToken token)
+        public async Task<IActionResult> Crawl([FromBody] CrawlRequest request, CancellationToken token)
         {
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             var pendingCount = await context.Outbox.CountAsync(token);
@@ -52,8 +53,8 @@ namespace Controllers.Controllers
             WorkItem item = new WorkItem()
             {
                 TaskId = Guid.NewGuid(),
-                Url = Url,
-                IdempotencyId = Url.HashUrl()
+                Url = request.Url,
+                IdempotencyId = request.Url.HashUrl()
             };
 
             var exists = await context.Successes.AnyAsync(s => s.IdempotencyId == item.IdempotencyId);
