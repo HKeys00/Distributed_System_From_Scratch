@@ -1,11 +1,11 @@
 using Data;
 using Data.Models.Task;
+using Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
-using System.Text;
-using System.Threading.Tasks;
+using System.Text.Json;
 using Timer = System.Timers.Timer;
 
 namespace Relay
@@ -148,7 +148,6 @@ namespace Relay
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
-            return;
             if (_processingOutbox)
             {
                 return;
@@ -277,11 +276,12 @@ namespace Relay
             for (int i = 0; i < workItems.Count; i++)
             {
                 var workItem = workItems[i];
+                var message = new CrawlMessage(workItem.IdempotencyId, workItem.Url);
                 _unAckedTasks.Add(batchStartingNumber + (ulong)i, workItem);
                 try
                 {
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
-                        body: Encoding.UTF8.GetBytes("AHHHH"));
+                        body: JsonSerializer.SerializeToUtf8Bytes(message));
                 }
                 catch (Exception ex)
                 {

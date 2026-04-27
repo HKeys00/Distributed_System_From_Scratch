@@ -115,13 +115,23 @@ namespace Worker_Node.Services
                 return;
             }
 
-
-            var job = JsonSerializer.Deserialize<CrawlMessage>(args.Body.Span);
-            if (job == null)
+            CrawlMessage? job = null;
+            try
             {
-                _logger.LogError("Failed to deserialize message, {message}", Encoding.UTF8.GetString(args.Body.ToArray()));
+                job = JsonSerializer.Deserialize<CrawlMessage>(args.Body.Span);    
+                if (job == null)
+                {
+                    await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
+                    _logger.LogError("Failed to deserialize message, {message}", Encoding.UTF8.GetString(args.Body.ToArray()));
+                    return;
+                }
+            } catch (Exception ex)
+            {
+                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
+                _logger.LogError("Unexpected error occured while processing message, {error}", ex.Message);
                 return;
             }
+
 
             _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
 
@@ -142,6 +152,7 @@ namespace Worker_Node.Services
             //     _logger.LogError("Failed to crawl {url}: {message}", url, ex.Message);
             // }
 
+            await Task.Delay(10000);
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
 

@@ -112,3 +112,6 @@ not sure how that'll work with non acked messages, maybe I set the sentAt when t
 
 28/04/26
 - Needed to set NextAttemptAt immediately for outbox rule of NextAttemptAt <= Now() to be true
+- Providing the same url even with a different order of query params resutls in the same idempotency id.
+- Back to getting basic acking and rejecting working properly need to add a conflict or success value and then focus on the retrying logic, at the moment always reject and don't try again when the message can't be processed
+but that's the rabbitMQ requeue method which I always want to be false because I'm manually handling requing.
