@@ -174,7 +174,8 @@ namespace Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTime?>("NextAttemptAt")
-                        .HasColumnType("timestamptz");
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("clock_timestamp()");
 
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
@@ -194,8 +195,7 @@ namespace Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("IdempotencyId")
-                        .IsUnique();
+                    b.HasIndex("IdempotencyId");
 
                     b.HasIndex("TaskId")
                         .IsUnique();

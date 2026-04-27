@@ -55,7 +55,7 @@ namespace Data.Migrations
                     CreatedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()"),
                     SentAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     PublishedAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
-                    NextAttemptAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
+                    NextAttemptAt = table.Column<DateTime>(type: "timestamptz", nullable: true, defaultValueSql: "clock_timestamp()"),
                     Retries = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
@@ -77,8 +77,7 @@ namespace Data.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_Tasks_IdempotencyId",
                 table: "Tasks",
-                column: "IdempotencyId",
-                unique: true);
+                column: "IdempotencyId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Tasks_TaskId",

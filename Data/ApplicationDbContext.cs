@@ -61,8 +61,11 @@ namespace Data
                 .HasDefaultValueSql("clock_timestamp()");
 
             modelBuilder.Entity<WorkItem>()
-                .HasIndex(w => w.IdempotencyId)
-                .IsUnique();
+                .Property(w => w.NextAttemptAt)
+                .HasDefaultValueSql("clock_timestamp()");
+
+            modelBuilder.Entity<WorkItem>()
+                .HasIndex(w => w.IdempotencyId);
 
             modelBuilder.Entity<Success>()
             .HasIndex(s => s.IdempotencyId)

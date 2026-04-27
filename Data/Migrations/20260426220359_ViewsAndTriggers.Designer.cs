@@ -197,9 +197,7 @@ namespace Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("IdempotencyId")
-                        .IsUnique()
-                        .HasFilter("\"PublishedAt == NULL\"");
+                    b.HasIndex("IdempotencyId");
 
                     b.HasIndex("TaskId")
                         .IsUnique();

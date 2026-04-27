@@ -108,3 +108,7 @@ not sure how that'll work with non acked messages, maybe I set the sentAt when t
 - Stale view needs an "attempt-scoped no conflict" clause — naive `NOT EXISTS conflict` excludes any task that's ever failed even if currently in-flight on a later attempt. Solution: `attempt` column on conflicts matching retry_count at time of failure, stale view checks `NOT EXISTS conflict WHERE attempt = current retry_count`.
 - State machine is now non-overlapping: pending publish (in outbox), in-flight (sentAt set, no conflict for current attempt, not yet stale), presumed-dead (in stale view), just-failed (back in outbox via nextAttemptAt), terminal success, terminal failure. Every task in exactly one state.
 - Lost-publish detection: stale view catches it for free, treated as a dead worker, retried. Incorrect framing but correct behaviour. Phase 2 will fix properly with publisher confirms.
+
+
+28/04/26
+- Needed to set NextAttemptAt immediately for outbox rule of NextAttemptAt <= Now() to be true
