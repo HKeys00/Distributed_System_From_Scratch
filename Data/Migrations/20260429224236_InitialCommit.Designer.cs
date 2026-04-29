@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260429080129_SuccessIdemIdRequired")]
-    partial class SuccessIdemIdRequired
+    [Migration("20260429224236_InitialCommit")]
+    partial class InitialCommit
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -59,6 +59,33 @@ namespace Data.Migrations
                     b.ToTable("Conflicts");
                 });
 
+            modelBuilder.Entity("Data.Models.Status.Dead", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("DeadAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("clock_timestamp()");
+
+                    b.Property<string>("IdempotencyId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId");
+
+                    b.ToTable("DLQ");
+                });
+
             modelBuilder.Entity("Data.Models.Status.Success", b =>
                 {
                     b.Property<int>("Id")
@@ -76,6 +103,9 @@ namespace Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("IdempotencyId")
@@ -89,6 +119,9 @@ namespace Data.Migrations
                     b.Property<long>("Id")
                         .HasColumnType("int8");
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamptz");
 
@@ -101,9 +134,6 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
@@ -127,6 +157,9 @@ namespace Data.Migrations
                     b.Property<long>("Id")
                         .HasColumnType("int8");
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamptz");
 
@@ -139,9 +172,6 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
@@ -168,6 +198,9 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
@@ -184,9 +217,6 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");

@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     /// <inheritdoc />
-    public partial class IntialCommit : Migration
+    public partial class InitialCommit : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -30,12 +30,28 @@ namespace Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "DLQ",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    TaskId = table.Column<Guid>(type: "uuid", nullable: false),
+                    IdempotencyId = table.Column<string>(type: "text", nullable: false),
+                    DeadAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_DLQ", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Successes",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    IdempotencyId = table.Column<string>(type: "text", nullable: true),
+                    TaskId = table.Column<Guid>(type: "uuid", nullable: false),
+                    IdempotencyId = table.Column<string>(type: "text", nullable: false),
                     FinishedAt = table.Column<DateTime>(type: "timestamptz", nullable: false, defaultValueSql: "clock_timestamp()")
                 },
                 constraints: table =>
@@ -69,6 +85,11 @@ namespace Data.Migrations
                 column: "IdempotencyId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_DLQ_TaskId",
+                table: "DLQ",
+                column: "TaskId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Successes_IdempotencyId",
                 table: "Successes",
                 column: "IdempotencyId",
@@ -91,6 +112,9 @@ namespace Data.Migrations
         {
             migrationBuilder.DropTable(
                 name: "Conflicts");
+
+            migrationBuilder.DropTable(
+                name: "DLQ");
 
             migrationBuilder.DropTable(
                 name: "Successes");
