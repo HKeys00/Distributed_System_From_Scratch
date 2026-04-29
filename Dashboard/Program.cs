@@ -59,7 +59,10 @@ static async Task<int> GetRabbitQueueDepth(string host, int port, string user, s
     var result = await channel.QueueDeclareAsync(queue: "outbox",
     durable: true, exclusive: false,
     autoDelete: false,
-    arguments: new Dictionary<string, object?> { { "x-queue-type", "quorum" } });
+    arguments: new Dictionary<string, object?> { 
+        { "x-queue-type", "quorum" },
+        { "x-dead-letter-exchange", "outbox"}
+    });
 
     return (int)result.MessageCount;
 }

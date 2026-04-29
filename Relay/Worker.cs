@@ -313,7 +313,10 @@ namespace Relay
                 await _rabbitChannel.QueueDeclareAsync(queue: "outbox",
                     durable: true, exclusive: false,
                     autoDelete: false,
-                    arguments: new Dictionary<string, object?> { { "x-queue-type", "quorum" } });
+                    arguments: new Dictionary<string, object?> { 
+                        { "x-queue-type", "quorum" },
+                        { "x-dead-letter-exchange", "outbox"}
+                    });
                 return;
             }
 
