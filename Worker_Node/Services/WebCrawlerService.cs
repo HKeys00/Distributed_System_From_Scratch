@@ -117,8 +117,8 @@ namespace Worker_Node.Services
                 return;
             }
 
-
-            await Task.Delay(100000);
+            Console.WriteLine("GOT TASK");
+            await Task.Delay(5000);
             CrawlMessage? job = null;
             try
             {
@@ -180,7 +180,7 @@ namespace Worker_Node.Services
                 return;
             }
 
-            await context.Successes.AddAsync(new Success(job.IdempotencyId));
+            await context.Successes.AddAsync(new Success(job.TaskId, job.IdempotencyId));
 
             foreach(var child in childUrls)
             {

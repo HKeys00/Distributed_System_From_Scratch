@@ -57,8 +57,14 @@ namespace Controllers.Controllers
                 IdempotencyId = request.Url.HashUrl()
             };
 
-            var exists = await context.Successes.AnyAsync(s => s.IdempotencyId == item.IdempotencyId);
-            if (!exists) context.Tasks.Add(item);
+            var exists = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == item.IdempotencyId);
+            if (exists != null)
+            {
+                _logger.LogInformation("{url} already recently crawled, skipping", request.Url);
+                return Accepted(exists.TaskId);
+            }
+
+            context.Tasks.Add(item);
 
             try
             {

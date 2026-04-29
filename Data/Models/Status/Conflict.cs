@@ -19,7 +19,7 @@ namespace Data.Models.Status
         /// Stable external identifier for the task. Correlation key between the database
         /// and broker.
         /// </summary>
-        public Guid TaskId { get; set; }
+        public required Guid TaskId { get; set; }
 
         /// <summary>
         /// SHA-256 hash of the URL that triggered the conflict. Matches the

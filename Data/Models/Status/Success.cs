@@ -17,6 +17,12 @@ namespace Data.Models.Status
         public int Id {get; set;}
 
         /// <summary>
+        /// Stable external identifier for the task. Correlation key between the database
+        /// and broker.
+        /// </summary>
+        public required Guid TaskId { get; set; }
+
+        /// <summary>
         /// SHA-256 hash of the URL of the completed task. Indexed as unique so a
         /// successful completion can be looked up quickly when deduplicating future
         /// submissions.
@@ -36,8 +42,9 @@ namespace Data.Models.Status
         public Success(){}
 
         [SetsRequiredMembers]
-        public Success(string idempotencyId)
+        public Success(Guid taskId, string idempotencyId)
         {
+            TaskId = taskId;
             IdempotencyId = idempotencyId;
         }
 
