@@ -13,7 +13,7 @@ namespace Data.Models.Task
         /// insertion ordering when the relay pages through the outbox.
         /// </summary>
         [Column(TypeName = "int8")]
-        public int Id { get; set; }
+        public long Id { get; set; }
 
         /// <summary>
         /// Stable external identifier for the task. Correlation key between the database

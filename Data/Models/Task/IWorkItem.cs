@@ -14,7 +14,7 @@ namespace Data.Models.Task
         /// through tasks — not exposed outside the system.
         /// </summary>
         [Column(TypeName = "int8")]
-        public int Id { get; set; }
+        public long Id { get; set; }
 
         /// <summary>
         /// Stable external identifier for the task. Used when updating row state and as the

@@ -117,6 +117,8 @@ namespace Worker_Node.Services
                 return;
             }
 
+
+            await Task.Delay(100000);
             CrawlMessage? job = null;
             try
             {
@@ -134,7 +136,6 @@ namespace Worker_Node.Services
                 return;
             }
 
-
             _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
@@ -148,6 +149,7 @@ namespace Worker_Node.Services
             try
             {
                 childUrls = await CrawlAsync(job.Url, CancellationToken.None);
+                childUrls = Array.Empty<string>(); //Test with only one task.
                 _logger.LogInformation("Crawl of {url} found {count} child urls", job.Url, childUrls.Length);
             }
             catch(HttpRequestException ex)

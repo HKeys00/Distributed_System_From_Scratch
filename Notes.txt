@@ -125,3 +125,4 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 - Ran google.com just as a test and holy shit I didn't realise how many child urls that would spawn, relay seems to be working quite well, some tasks are getting stuck though
 - Attempt is not being updated with each conflict only seeing one conflict when a task has failed multiple times, 
 - Worker isn't checking for success or conflict now that I think about it before fetching the url, it should.
+- 
