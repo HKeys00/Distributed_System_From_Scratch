@@ -33,6 +33,11 @@ namespace Data
         /// </summary>
         public DbSet<Success> Successes { get; set; }
 
+        /// <summary>
+        /// Represents the database table for dead items.
+        /// </summary>
+        public DbSet<Dead> DLQ {get; set;}
+
         #endregion
 
         #region Constructor
@@ -81,6 +86,13 @@ namespace Data
 
             modelBuilder.Entity<Conflict>()
             .HasIndex(c => c.IdempotencyId);
+
+            modelBuilder.Entity<Dead>()
+            .HasIndex(d => d.TaskId);
+
+            modelBuilder.Entity<Dead>()
+            .Property(d => d.DeadAt)
+            .HasDefaultValueSql("clock_timestamp()");
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");

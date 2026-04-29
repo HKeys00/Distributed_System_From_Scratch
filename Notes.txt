@@ -127,3 +127,8 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 - Worker isn't checking for success or conflict now that I think about it before fetching the url, it should.
 - Worker is now checking for success should it check for conflict?
 - Need to implement a DLQ to place tasks that have failed 5 times.
+- Adding DLQ table, also added it to rabbit but it's pointless and not used at the moment
+- Worker needs to check for a conflict record with the same task id and attempt number to make sure it can throw away duplicate requests
+
+30/04/26
+- Added DLQ table and renamed retries to attempts so it's more in line with what the column is actually used for, needed to adjust the logic so an attempt is incremented everytime the message is sent, this way it's actually on sent 5 times instead of being retried 5 and sent 6 times.

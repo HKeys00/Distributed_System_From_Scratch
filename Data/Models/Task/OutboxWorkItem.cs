@@ -58,8 +58,8 @@ namespace Data.Models.Task
         public DateTime? NextAttemptAt {get; set;}
 
         /// <summary>
-        /// Number of times the task has been re-dispatched after going stale.
+        /// Number of times the relay has sent this message.
         /// </summary>
-        public int Retries { get; set; }
+        public int Attempts { get; set; }
     }
 }

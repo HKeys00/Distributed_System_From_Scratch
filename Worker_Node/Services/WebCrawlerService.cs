@@ -117,8 +117,6 @@ namespace Worker_Node.Services
                 return;
             }
 
-            Console.WriteLine("GOT TASK");
-            await Task.Delay(5000);
             CrawlMessage? job = null;
             try
             {
@@ -138,9 +136,18 @@ namespace Worker_Node.Services
 
             _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
             await using var context = await _dbContextFactory.CreateDbContextAsync();
+
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
             if (existingSuccess != null)
             {
+                //Between creating the task and this worker receiving it, the site had been scraped.
+                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
+                return;
+            }
+            var existingFailure = await context.Conflicts.FirstOrDefaultAsync(c => c.TaskId == job.TaskId && c.Attempt == job.Attempt);
+            if (existingFailure != null)
+            {
+                //Duplicate message.
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
@@ -162,7 +169,7 @@ namespace Worker_Node.Services
                 await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
                     $@"UPDATE ""Tasks""                                                                                                                       
                         SET ""SentAt"" = NULL,                                                                                                                 
-                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Retries""))                                                        
+                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempts""))                                                        
                         WHERE ""TaskId"" = {job.TaskId}"
                 );
 
