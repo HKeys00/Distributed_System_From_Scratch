@@ -12,11 +12,6 @@ namespace Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.RenameColumn(
-                name: "Retries",
-                table: "Tasks",
-                newName: "Attempts");
-
             migrationBuilder.CreateTable(
                 name: "DLQ",
                 columns: table => new

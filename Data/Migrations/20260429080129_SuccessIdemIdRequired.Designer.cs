@@ -102,7 +102,7 @@ namespace Data.Migrations
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
 
-                    b.Property<int>("Retries")
+                    b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("SentAt")
@@ -140,7 +140,7 @@ namespace Data.Migrations
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
 
-                    b.Property<int>("Retries")
+                    b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("SentAt")
@@ -185,7 +185,7 @@ namespace Data.Migrations
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamptz");
 
-                    b.Property<int>("Retries")
+                    b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("SentAt")
