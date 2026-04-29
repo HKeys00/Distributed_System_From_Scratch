@@ -6,6 +6,8 @@ namespace Shared.Helpers
 {
     public static class Helpers
     {
+        #region Methods
+
         /// <summary>
         /// Parses a URL, sorts its query parameters alphabetically,
         /// lowercases everything, and returns a SHA256 hex hash.
@@ -39,5 +41,7 @@ namespace Shared.Helpers
             // Lowercase the entire normalized URL
             return builder.Uri.ToString().ToLowerInvariant();
         }
+
+        #endregion
     }
 }

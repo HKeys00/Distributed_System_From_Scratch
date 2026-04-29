@@ -115,3 +115,13 @@ not sure how that'll work with non acked messages, maybe I set the sentAt when t
 - Providing the same url even with a different order of query params resutls in the same idempotency id.
 - Back to getting basic acking and rejecting working properly need to add a conflict or success value and then focus on the retrying logic, at the moment always reject and don't try again when the message can't be processed
 but that's the rabbitMQ requeue method which I always want to be false because I'm manually handling requing.
+- Feel like I've been stuck on this scheme message durability stage for a month at this point, I guess that's because I have been.
+
+
+29/04/26
+- Handling success and failure in worker node, don't like the current set up of having the worker handle resetting the task and setting the nextAttemptAt but I don't have a better implementation at the momnent
+- Atomic handling of conflicts so that the task is reset and the conflict is created in the same transaction
+- Need to figure out a better way of handling a dead SQL connection so that if a success isn't written the task isn't just thrown away, my web crawler is pretty cheap so simply saying failed and retrying straight away is a solution for now, I guess the database is the heart of this so if that goes down I'm kind fucked anyway, maybe look at setting up redundent databases, partitioning/fragmenting what ever it's called
+- Ran google.com just as a test and holy shit I didn't realise how many child urls that would spawn, relay seems to be working quite well, some tasks are getting stuck though
+- Attempt is not being updated with each conflict only seeing one conflict when a task has failed multiple times, 
+- Worker isn't checking for success or conflict now that I think about it before fetching the url, it should.

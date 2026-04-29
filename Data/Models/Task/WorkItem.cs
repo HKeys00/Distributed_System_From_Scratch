@@ -1,4 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
+using System.Diagnostics.CodeAnalysis;
+using Shared.Helpers;
 
 namespace Data.Models.Task
 {
@@ -10,6 +12,8 @@ namespace Data.Models.Task
     [Table("Tasks")]
     public class WorkItem : IWorkItem
     {
+        #region properties
+
         /// <summary>
         /// Auto-incrementing surrogate primary key. Used for insertion ordering when paging
         /// through tasks.
@@ -63,5 +67,21 @@ namespace Data.Models.Task
         /// Number of times the relay has re-dispatched this task after it went stale.
         /// </summary>
         public int Retries { get; set; }
+
+        #endregion
+
+        #region Constructor
+
+        public WorkItem(){}
+
+        [SetsRequiredMembers]
+        public WorkItem(string url)
+        {
+            IdempotencyId = url.HashUrl();
+            TaskId = Guid.NewGuid();
+            Url = url;
+        }
+
+        #endregion
     }
 }

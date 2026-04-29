@@ -1,4 +1,4 @@
 namespace Shared.DTOs
 {
-    public record CrawlMessage(string IdempotencyId, string Url); 
+    public record CrawlMessage(Guid TaskId, string IdempotencyId, string Url, int Attempt); 
 }

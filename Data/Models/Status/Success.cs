@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
+using System.Diagnostics.CodeAnalysis;
 namespace Data.Models.Status
 {
     /// <summary>
@@ -8,6 +9,8 @@ namespace Data.Models.Status
     /// </summary>
     public class Success
     {
+        #region Properties 
+
         /// <summary>
         /// Auto-incrementing surrogate primary key of this success record.
         /// </summary>
@@ -18,12 +21,26 @@ namespace Data.Models.Status
         /// successful completion can be looked up quickly when deduplicating future
         /// submissions.
         /// </summary>
-        public string? IdempotencyId { get; set; }
+        public required string IdempotencyId { get; set; }
 
         /// <summary>
         /// Timestamp the task finished. Defaults to clock_timestamp() on the database.
         /// </summary>
         [Column(TypeName = "timestamptz")]
         public DateTime FinishedAt { get; set; }
+
+        #endregion
+
+        #region Constructor
+
+        public Success(){}
+
+        [SetsRequiredMembers]
+        public Success(string idempotencyId)
+        {
+            IdempotencyId = idempotencyId;
+        }
+
+        #endregion
     }
 }

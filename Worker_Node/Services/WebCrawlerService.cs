@@ -1,4 +1,6 @@
 using Data;
+using Data.Models.Status;
+using Data.Models.Task;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client.Events;
 using Shared.DTOs;
@@ -134,25 +136,67 @@ namespace Worker_Node.Services
 
 
             _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
+            if (existingSuccess != null)
+            {
+                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
+                return;
+            }
 
-            // await using var context = await _dbContextFactory.CreateDbContextAsync();
-            // try
-            // {
-            //     context.Success
-            // }
+            string[]? childUrls;
+            try
+            {
+                childUrls = await CrawlAsync(job.Url, CancellationToken.None);
+                _logger.LogInformation("Crawl of {url} found {count} child urls", job.Url, childUrls.Length);
+            }
+            catch(HttpRequestException ex)
+            {
+                _logger.LogWarning("Crawl of {url} returned status code {code}", job.Url, ex.StatusCode);
+                //TODO: Don't really like this being the workers job but fine for now
+                
+                await using var transaction = await context.Database.BeginTransactionAsync();
+                
+                await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
+                    $@"UPDATE ""Tasks""                                                                                                                       
+                        SET ""SentAt"" = NULL,                                                                                                                 
+                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Retries""))                                                        
+                        WHERE ""TaskId"" = {job.TaskId}"
+                );
 
+                context.Add(new Conflict()
+                {
+                    TaskId = job.TaskId,
+                    IdempotencyId = job.IdempotencyId,
+                    Reason = ex.Message,
+                    Attempt = job.Attempt
+                });
+                await context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                
+                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
+                return;
+            }
 
-            // try
-            // {
-            //     var childUrls = await CrawlAsync(url, CancellationToken.None);
-            //     _logger.LogInformation("Crawl of {url} found {count} child urls", url, childUrls.Length);
-            // }
-            // catch (Exception ex)
-            // {
-            //     _logger.LogError("Failed to crawl {url}: {message}", url, ex.Message);
-            // }
+            await context.Successes.AddAsync(new Success(job.IdempotencyId));
 
-            await Task.Delay(10000);
+            foreach(var child in childUrls)
+            {
+                await context.Tasks.AddAsync(new WorkItem(child));
+            }
+
+            try
+            {
+                await context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Failed to save changes to database with message, {message}", ex.Message);
+                //TODO Publish to a retry queue rather than immdeiately retrying
+                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
+                return;
+            }
+
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
 
@@ -176,11 +220,7 @@ namespace Worker_Node.Services
             }
 
             using var response = await _httpClient.GetAsync(baseUri, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Non-success status {code} for {url}", (int)response.StatusCode, url);
-                return Array.Empty<string>();
-            }
+            response.EnsureSuccessStatusCode();
 
             var contentType = response.Content.Headers.ContentType?.MediaType;
             if (contentType is not null && !contentType.Contains("html", StringComparison.OrdinalIgnoreCase))

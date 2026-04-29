@@ -8,6 +8,8 @@ namespace Data.Models.Status
     /// </summary>
     public class Conflict
     {
+        #region Properties
+
         /// <summary>
         /// Auto-incrementing surrogate primary key of this conflict record.
         /// </summary>
@@ -41,5 +43,7 @@ namespace Data.Models.Status
         /// The attempt number for this task.
         /// </summary>
         public required int Attempt {get; set;}
+
+        #endregion
     }
 }
