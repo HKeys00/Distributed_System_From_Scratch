@@ -23,6 +23,13 @@ namespace Data.Models.Task
         public Guid TaskId { get; set; }
 
         /// <summary>
+        /// Tracing identifier that follows a single logical request from the HTTP entry point
+        /// through the relay and worker. Distinct from <see cref="TaskId"/>: a retry or
+        /// re-dispatch keeps the same correlation id so all related log lines join up.
+        /// </summary>
+        public Guid CorrelationId { get; set; }
+
+        /// <summary>
         /// SHA-256 hash of the normalised URL. Used as the idempotency key so duplicate
         /// submissions of the same URL can be detected and rejected.
         /// </summary>
@@ -61,6 +68,6 @@ namespace Data.Models.Task
         /// <summary>
         /// Number of times the relay has sent this message.
         /// </summary>
-        public int Attempts { get; set; }
+        public int Attempt { get; set; }
     }
 }

@@ -119,7 +119,7 @@ namespace Data.Migrations
                     b.Property<long>("Id")
                         .HasColumnType("int8");
 
-                    b.Property<int>("Attempts")
+                    b.Property<int>("Attempt")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAt")
@@ -157,7 +157,7 @@ namespace Data.Migrations
                     b.Property<long>("Id")
                         .HasColumnType("int8");
 
-                    b.Property<int>("Attempts")
+                    b.Property<int>("Attempt")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAt")
@@ -198,7 +198,7 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
-                    b.Property<int>("Attempts")
+                    b.Property<int>("Attempt")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("CreatedAt")

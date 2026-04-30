@@ -72,7 +72,7 @@ namespace Data.Migrations
                     SentAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     PublishedAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     NextAttemptAt = table.Column<DateTime>(type: "timestamptz", nullable: true, defaultValueSql: "clock_timestamp()"),
-                    Attempts = table.Column<int>(type: "integer", nullable: false)
+                    Attempt = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {

@@ -116,7 +116,7 @@ namespace Worker_Node.Services
             {
                 return;
             }
-
+            
             CrawlMessage? job = null;
             try
             {
@@ -162,16 +162,38 @@ namespace Worker_Node.Services
             catch(HttpRequestException ex)
             {
                 _logger.LogWarning("Crawl of {url} returned status code {code}", job.Url, ex.StatusCode);
+                
                 //TODO: Don't really like this being the workers job but fine for now
-                
                 await using var transaction = await context.Database.BeginTransactionAsync();
-                
+
+                if (job.Attempt == 5)
+                {       //DLQ 
+                    await context.DLQ.AddAsync(new Dead()
+                    {
+                        TaskId = job.TaskId,
+                        IdempotencyId = job.IdempotencyId
+                    });
+
+                    await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
+                    await context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return;
+                }
+
+                // await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
+                //     $@"UPDATE ""Tasks""                                                                                                                       
+                //         SET ""SentAt"" = NULL,                                                                                                                 
+                //             ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempt""))                                                        
+                //         WHERE ""TaskId"" = {job.TaskId}"
+                // );
+
                 await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
                     $@"UPDATE ""Tasks""                                                                                                                       
                         SET ""SentAt"" = NULL,                                                                                                                 
-                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempts""))                                                        
+                            ""NextAttemptAt"" = now() + (interval '10 seconds')                                                        
                         WHERE ""TaskId"" = {job.TaskId}"
                 );
+
 
                 context.Add(new Conflict()
                 {

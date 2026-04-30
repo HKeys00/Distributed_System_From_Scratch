@@ -22,6 +22,12 @@ namespace Data.Models.Task
         public Guid TaskId { get; set; }
 
         /// <summary>
+        /// Tracing identifier carried through from the originating request. Forwarded into
+        /// the broker message envelope so workers can stitch logs back to the HTTP call.
+        /// </summary>
+        public Guid CorrelationId { get; set; }
+
+        /// <summary>
         /// SHA-256 hash of the normalised URL. Used as the idempotency key so duplicate
         /// submissions of the same URL can be detected and rejected.
         /// </summary>
@@ -60,6 +66,6 @@ namespace Data.Models.Task
         /// <summary>
         /// Number of times the relay has sent this message.
         /// </summary>
-        public int Attempts { get; set; }
+        public int Attempt { get; set; }
     }
 }
