@@ -177,7 +177,7 @@ namespace Relay
 
                 try
                 {
-                    tasks = await context.Outbox.Take(pageSize * page).AsNoTracking().ToListAsync();
+                    tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
                 } 
                 catch (Exception ex)
                 {
@@ -236,7 +236,7 @@ namespace Relay
 
                 try
                 {
-                    staleTasks = await context.StaleTasks.Take(pageSize * page).AsNoTracking().ToListAsync();
+                    staleTasks = await context.StaleTasks.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
                 }
                 catch (Exception ex)
                 {

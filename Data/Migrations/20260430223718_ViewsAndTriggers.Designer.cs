@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260430083528_ViewsAndTriggers")]
+    [Migration("20260430223718_ViewsAndTriggers")]
     partial class ViewsAndTriggers
     {
         /// <inheritdoc />
@@ -35,6 +35,9 @@ namespace Data.Migrations
 
                     b.Property<int>("Attempt")
                         .HasColumnType("integer");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("FailedAt")
                         .ValueGeneratedOnAdd()
@@ -67,6 +70,9 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("DeadAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
@@ -93,6 +99,9 @@ namespace Data.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("FinishedAt")
                         .ValueGeneratedOnAdd()
