@@ -21,10 +21,19 @@ namespace Controllers.Middleware
 
         public async Task InvokeAsync(HttpContext context)
         {
-            var correlationId = context.Request.Headers.TryGetValue(CorrelationConstants.HeaderName, out var raw)
-                && Guid.TryParse(raw, out var parsed)
-                    ? parsed
-                    : Guid.NewGuid();
+            Guid correlationId;
+            bool headerSupplied;
+            if (context.Request.Headers.TryGetValue(CorrelationConstants.HeaderName, out var raw)
+                && Guid.TryParse(raw, out var parsed))
+            {
+                correlationId = parsed;
+                headerSupplied = true;
+            }
+            else
+            {
+                correlationId = Guid.NewGuid();
+                headerSupplied = false;
+            }
 
             context.Items[CorrelationConstants.HttpContextItemKey] = correlationId;
             context.Response.Headers[CorrelationConstants.HeaderName] = correlationId.ToString();
@@ -34,6 +43,7 @@ namespace Controllers.Middleware
                 [CorrelationConstants.LogScopeKey] = correlationId
             }))
             {
+                _logger.LogDebug("Resolved correlation id from {Source}", headerSupplied ? "header" : "minted");
                 await _next(context);
             }
         }

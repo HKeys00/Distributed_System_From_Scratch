@@ -17,6 +17,12 @@ namespace Data.Models.Status
         public required Guid TaskId { get; set; }
 
         /// <summary>
+        /// Tracing identifier inherited from the originating request, carried through the
+        /// relay and worker so the DLQ record can be joined back to the task lifecycle.
+        /// </summary>
+        public required Guid CorrelationId { get; set; }
+
+        /// <summary>
         /// SHA-256 hash of the URL that triggered the conflict. Matches the
         /// IdempotencyId of an existing task in the Tasks table.
         /// </summary>

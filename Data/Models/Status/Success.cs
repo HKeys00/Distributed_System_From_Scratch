@@ -23,6 +23,12 @@ namespace Data.Models.Status
         public required Guid TaskId { get; set; }
 
         /// <summary>
+        /// Tracing identifier inherited from the originating request, carried through the
+        /// relay and worker so the success record can be joined back to the task lifecycle.
+        /// </summary>
+        public required Guid CorrelationId { get; set; }
+
+        /// <summary>
         /// SHA-256 hash of the URL of the completed task. Indexed as unique so a
         /// successful completion can be looked up quickly when deduplicating future
         /// submissions.
@@ -42,9 +48,10 @@ namespace Data.Models.Status
         public Success(){}
 
         [SetsRequiredMembers]
-        public Success(Guid taskId, string idempotencyId)
+        public Success(Guid taskId, Guid correlationId, string idempotencyId)
         {
             TaskId = taskId;
+            CorrelationId = correlationId;
             IdempotencyId = idempotencyId;
         }
 

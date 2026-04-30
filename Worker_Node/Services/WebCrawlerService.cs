@@ -3,6 +3,7 @@ using Data.Models.Status;
 using Data.Models.Task;
 using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client.Events;
+using Shared.Constants;
 using Shared.DTOs;
 using System.Text;
 using System.Text.Json;
@@ -120,27 +121,43 @@ namespace Worker_Node.Services
             CrawlMessage? job = null;
             try
             {
-                job = JsonSerializer.Deserialize<CrawlMessage>(args.Body.Span);    
+                job = JsonSerializer.Deserialize<CrawlMessage>(args.Body.Span);
                 if (job == null)
                 {
                     await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
-                    _logger.LogError("Failed to deserialize message, {message}", Encoding.UTF8.GetString(args.Body.ToArray()));
+                    var raw = Encoding.UTF8.GetString(args.Body.ToArray());
+                    if (raw.Length > 512)
+                    {
+                        raw = raw[..512] + "...";
+                    }
+                    _logger.LogError("Failed to deserialize message {Body}", raw);
                     return;
                 }
             } catch (Exception ex)
             {
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
-                _logger.LogError("Unexpected error occured while processing message, {error}", ex.Message);
+                _logger.LogError(ex, "Unexpected error occurred while deserializing message");
                 return;
             }
 
-            _logger.LogInformation("Received crawl job for {key}, {url}", job.IdempotencyId, job.Url);
+            using var scope = _logger.BeginScope(new Dictionary<string, object>
+            {
+                [CorrelationConstants.LogScopeKey] = job.CorrelationId,
+                ["TaskId"] = job.TaskId,
+                ["IdempotencyId"] = job.IdempotencyId,
+                ["Url"] = job.Url,
+                ["Attempt"] = job.Attempt,
+                ["DeliveryTag"] = args.DeliveryTag
+            });
+
+            _logger.LogInformation("Received crawl job");
             await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
             if (existingSuccess != null)
             {
                 //Between creating the task and this worker receiving it, the site had been scraped.
+                _logger.LogInformation("Skipping crawl, idempotency id already recorded as success");
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
@@ -148,6 +165,7 @@ namespace Worker_Node.Services
             if (existingFailure != null)
             {
                 //Duplicate message.
+                _logger.LogInformation("Skipping crawl, duplicate delivery for this attempt");
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
@@ -157,20 +175,22 @@ namespace Worker_Node.Services
             {
                 childUrls = await CrawlAsync(job.Url, CancellationToken.None);
                 childUrls = Array.Empty<string>(); //Test with only one task.
-                _logger.LogInformation("Crawl of {url} found {count} child urls", job.Url, childUrls.Length);
+                _logger.LogInformation("Crawl completed with {ChildCount} child urls", childUrls.Length);
             }
             catch(HttpRequestException ex)
             {
-                _logger.LogWarning("Crawl of {url} returned status code {code}", job.Url, ex.StatusCode);
+                _logger.LogWarning(ex, "Crawl returned status code {StatusCode}", ex.StatusCode);
                 
                 //TODO: Don't really like this being the workers job but fine for now
                 await using var transaction = await context.Database.BeginTransactionAsync();
 
                 if (job.Attempt == 5)
-                {       //DLQ 
+                {       //DLQ
+                    _logger.LogWarning("Task moved to DLQ after {Attempt} attempts", job.Attempt);
                     await context.DLQ.AddAsync(new Dead()
                     {
                         TaskId = job.TaskId,
+                        CorrelationId = job.CorrelationId,
                         IdempotencyId = job.IdempotencyId
                     });
 
@@ -198,6 +218,7 @@ namespace Worker_Node.Services
                 context.Add(new Conflict()
                 {
                     TaskId = job.TaskId,
+                    CorrelationId = job.CorrelationId,
                     IdempotencyId = job.IdempotencyId,
                     Reason = ex.Message,
                     Attempt = job.Attempt
@@ -209,7 +230,7 @@ namespace Worker_Node.Services
                 return;
             }
 
-            await context.Successes.AddAsync(new Success(job.TaskId, job.IdempotencyId));
+            await context.Successes.AddAsync(new Success(job.TaskId, job.CorrelationId, job.IdempotencyId));
 
             foreach(var child in childUrls)
             {
@@ -222,12 +243,13 @@ namespace Worker_Node.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError("Failed to save changes to database with message, {message}", ex.Message);
+                _logger.LogError(ex, "Failed to save changes to database");
                 //TODO Publish to a retry queue rather than immdeiately retrying
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
                 return;
             }
 
+            _logger.LogInformation("Crawl persisted, {ChildCount} new tasks queued", childUrls.Length);
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
 
@@ -246,7 +268,7 @@ namespace Worker_Node.Services
 
             if (!Uri.TryCreate(url, UriKind.Absolute, out var baseUri))
             {
-                _logger.LogWarning("Invalid crawl url skipped: {url}", url);
+                _logger.LogWarning("Invalid crawl url skipped: {Url}", url);
                 return Array.Empty<string>();
             }
 

@@ -78,7 +78,7 @@ namespace Controllers.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError("Unexpected error occured. {message}", ex.Message);
+                _logger.LogError(ex, "Unexpected error in crawl request");
                 return StatusCode(500, $"Internal server error. {ex.Message}"); //String interpolation not very performant.
             }
 

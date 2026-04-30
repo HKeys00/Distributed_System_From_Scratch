@@ -1,5 +1,6 @@
 using Data;
 using Data.Models.Task;
+using Shared.Constants;
 using Shared.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -85,7 +86,7 @@ namespace Relay
                     await cmd.ExecuteNonQueryAsync(stoppingToken);
                 } catch (Exception ex)
                 {
-                    _logger.LogError("Failed to create listener for task_channel, {message}", ex.Message);
+                    _logger.LogError(ex, "Failed to create listener for task_channel");
                 }
             }
 
@@ -117,14 +118,25 @@ namespace Relay
         /// message properties.</param>
         private async Task OnAckReturn(object sender, BasicAckEventArgs args)
         {
+            using var deliveryScope = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["DeliveryTag"] = args.DeliveryTag
+            });
+
             var removed = _unAckedTasks.Remove(args.DeliveryTag, out var task);
             if (!removed || task == null)
             {
                 //Acking a task that has already either been re sent or marked as acked, either way ignore and keep going.
-                _logger.LogWarning("Task {tag} has already been resent or marked as acked", args.DeliveryTag);
+                _logger.LogWarning("Ack received for task that has already been resent or marked as acked");
                 await Task.Yield();
                 return;
             }
+
+            using var taskScope = _logger.BeginScope(new Dictionary<string, object>
+            {
+                [CorrelationConstants.LogScopeKey] = task.CorrelationId,
+                ["TaskId"] = task.TaskId
+            });
 
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             try
@@ -132,14 +144,14 @@ namespace Relay
                 await context.Database.BeginTransactionAsync();
                 await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
                 await context.Database.CommitTransactionAsync();
-                _logger.LogInformation("Marked task with id {id} as acked", task.TaskId);
+                _logger.LogInformation("Marked task as acked");
             } catch (Exception ex)
             {
-                _logger.LogError("Failed to ack task with id {id}, {message}", task.TaskId, ex.Message);
+                _logger.LogError(ex, "Failed to ack task");
             } finally
             {
                 _pendingTasks.Remove(task.TaskId);
-            }            
+            }
         }
 
         /// <summary>
@@ -170,7 +182,7 @@ namespace Relay
                 catch (Exception ex)
                 {
                     //Database not ready yet.
-                    _logger.LogError("Error trying to read {name}, skipping process. {message}", nameof(context.Outbox), ex.Message);
+                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.Outbox));
                     break;
                 }
 
@@ -191,7 +203,7 @@ namespace Relay
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("Unexpected error occured while sending outbox tasks, {message}", ex.Message);
+                    _logger.LogError(ex, "Unexpected error occurred while sending outbox tasks");
                     break;
                 }
                 
@@ -229,7 +241,7 @@ namespace Relay
                 catch (Exception ex)
                 {
                     //Database not ready yet.
-                    _logger.LogError("Error trying to read {name}, skipping process. {message}", nameof(context.StaleTasks), ex.Message);
+                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.StaleTasks));
                     break;
                 }
 
@@ -250,7 +262,7 @@ namespace Relay
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("Unexpected error occured while sending stale tasks, {message}", ex.Message);
+                    _logger.LogError(ex, "Unexpected error occurred while sending stale tasks");
                     break;
                 }
 
@@ -277,15 +289,26 @@ namespace Relay
             {
                 var workItem = workItems[i];
                 var message = new CrawlMessage(workItem.TaskId, workItem.CorrelationId, workItem.IdempotencyId, workItem.Url, workItem.Attempt + 1);
+
+                using var itemScope = _logger.BeginScope(new Dictionary<string, object>
+                {
+                    [CorrelationConstants.LogScopeKey] = workItem.CorrelationId,
+                    ["TaskId"] = workItem.TaskId,
+                    ["IdempotencyId"] = workItem.IdempotencyId,
+                    ["Url"] = workItem.Url,
+                    ["Attempt"] = workItem.Attempt + 1
+                });
+
                 _unAckedTasks.Add(batchStartingNumber + (ulong)i, workItem);
                 try
                 {
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
                         body: JsonSerializer.SerializeToUtf8Bytes(message));
+                    _logger.LogDebug("Published task to broker");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("Message with id {id} failed to send across rabbit channel, {message}", workItem.Id, ex.Message);
+                    _logger.LogError(ex, "Message failed to send across rabbit channel");
                     continue;
                 }
                 sentMessages.Add(workItem.TaskId);
