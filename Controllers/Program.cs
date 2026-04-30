@@ -1,3 +1,4 @@
+using Controllers.Middleware;
 using Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,6 +11,8 @@ builder.Services.AddDbContextFactory<ApplicationDbContext>();
 builder.Services.AddControllers();
 
 var app = builder.Build();
+
+app.UseMiddleware<CorrelationIdMiddleware>();
 
 app.MapControllers();
 app.Run();

@@ -276,7 +276,7 @@ namespace Relay
             for (int i = 0; i < workItems.Count; i++)
             {
                 var workItem = workItems[i];
-                var message = new CrawlMessage(workItem.TaskId, workItem.IdempotencyId, workItem.Url, workItem.Attempt + 1);
+                var message = new CrawlMessage(workItem.TaskId, workItem.CorrelationId, workItem.IdempotencyId, workItem.Url, workItem.Attempt + 1);
                 _unAckedTasks.Add(batchStartingNumber + (ulong)i, workItem);
                 try
                 {

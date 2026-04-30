@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260429224257_ViewsAndTriggers")]
-    partial class ViewsAndTriggers
+    [Migration("20260430082703_AddingCorellationID")]
+    partial class AddingCorellationID
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -122,6 +122,9 @@ namespace Data.Migrations
                     b.Property<int>("Attempt")
                         .HasColumnType("integer");
 
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamptz");
 
@@ -159,6 +162,9 @@ namespace Data.Migrations
 
                     b.Property<int>("Attempt")
                         .HasColumnType("integer");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamptz");
@@ -200,6 +206,9 @@ namespace Data.Migrations
 
                     b.Property<int>("Attempt")
                         .HasColumnType("integer");
+
+                    b.Property<Guid>("CorrelationId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()

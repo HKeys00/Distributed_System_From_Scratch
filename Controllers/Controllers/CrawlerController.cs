@@ -3,6 +3,7 @@ using Data;
 using Data.Models.Task;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Shared.Constants;
 using Shared.Helpers;
 
 namespace Controllers.Controllers
@@ -50,9 +51,14 @@ namespace Controllers.Controllers
                 return StatusCode(429, "Too many requests. Please try again later.");
             }
 
+            var correlationId = HttpContext.Items[CorrelationConstants.HttpContextItemKey] is Guid id
+                ? id
+                : Guid.NewGuid();
+
             WorkItem item = new WorkItem()
             {
                 TaskId = Guid.NewGuid(),
+                CorrelationId = correlationId,
                 Url = request.Url,
                 IdempotencyId = request.Url.HashUrl()
             };
