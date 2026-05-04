@@ -38,6 +38,18 @@ public static class AppMetrics
         public static readonly Gauge OutboxDepth = Metrics.CreateGauge(
             "relay_outbox_depth",
             "Current number of unpublished items in the outbox view.");
+
+        public static readonly Gauge OutboxOldestUnpublishedSeconds = Metrics.CreateGauge(
+            "relay_outbox_oldest_unpublished_age_seconds",
+            "Age, in seconds, of the oldest unpublished task in the outbox view (0 if empty).");
+
+        public static readonly Gauge StaleDepth = Metrics.CreateGauge(
+            "relay_stale_depth",
+            "Current number of items in the stale tasks view.");
+
+        public static readonly Gauge StaleOldestSeconds = Metrics.CreateGauge(
+            "relay_stale_oldest_age_seconds",
+            "Age, in seconds, since the oldest stale task was last dispatched (0 if empty).");
     }
 
     public static class Worker

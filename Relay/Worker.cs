@@ -176,10 +176,13 @@ namespace Relay
             try
             {
                 AppMetrics.Relay.OutboxDepth.Set(await context.Outbox.CountAsync());
+                var oldest = await context.Outbox.MinAsync(t => (DateTime?)t.CreatedAt);
+                AppMetrics.Relay.OutboxOldestUnpublishedSeconds.Set(
+                    oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Could not read outbox depth for metrics");
+                _logger.LogDebug(ex, "Could not read outbox metrics");
             }
 
             int page = 1;
@@ -240,6 +243,18 @@ namespace Relay
 
             _processingStale = true;
             await using var context = await _dbContextFactory.CreateDbContextAsync();
+
+            try
+            {
+                AppMetrics.Relay.StaleDepth.Set(await context.StaleTasks.CountAsync());
+                var oldest = await context.StaleTasks.MinAsync(t => t.SentAt);
+                AppMetrics.Relay.StaleOldestSeconds.Set(
+                    oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not read stale-task metrics");
+            }
 
             int page = 1;
             const int pageSize = 5;
