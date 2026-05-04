@@ -25,8 +25,11 @@ services:
     working_dir: /app
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
+        condition: service_healthy
+      seq:
         condition: service_healthy
 
   rabbitmq:
@@ -42,6 +45,22 @@ services:
       - "5672:5672"
       - "15672:15672"
 
+  seq:
+    image: datalust/seq:latest
+    container_name: seq
+    restart: always
+    environment:
+      ACCEPT_EULA: "Y"
+    ports:
+      - "5341:80"
+    volumes:
+      - seqdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   controllers:
     build:
       context: .
@@ -53,8 +72,11 @@ services:
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:5000
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
+        condition: service_healthy
+      seq:
         condition: service_healthy
 
   relay:
@@ -65,10 +87,13 @@ services:
     working_dir: /app
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      seq:
         condition: service_healthy
 
   worker-node:
@@ -82,10 +107,13 @@ services:
       DATA_DIR: /data
       PEERS:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      seq:
         condition: service_healthy
 
   # dashboard:
@@ -104,3 +132,4 @@ services:
 
 volumes:
   pgdata:
+  seqdata:

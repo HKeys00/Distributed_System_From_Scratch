@@ -1,13 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using Data;
 using Relay;
+using Shared.Helpers;
 
-var builder = Host.CreateApplicationBuilder(args);
-
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-builder.Services.AddDbContextFactory<ApplicationDbContext>();
-builder.Services.AddHostedService<Worker>();
+var builder = Host.CreateDefaultBuilder(args)
+    .UseSeqLogging("Relay")
+    .ConfigureServices((context, services) =>
+    {
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseNpgsql(context.Configuration.GetConnectionString("DefaultConnection")));
+        services.AddDbContextFactory<ApplicationDbContext>();
+        services.AddHostedService<Worker>();
+    });
 
 var host = builder.Build();
 host.Run();

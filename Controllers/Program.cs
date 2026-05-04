@@ -1,8 +1,11 @@
 using Controllers.Middleware;
 using Data;
 using Microsoft.EntityFrameworkCore;
+using Shared.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSeqLogging("Controllers");
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));

@@ -1,7 +1,10 @@
 using Data;
 using Microsoft.EntityFrameworkCore;
+using Shared.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSeqLogging("Data");
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -10,18 +13,18 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    // Check and apply pending migrations
-    var pendingMigrations = dbContext.Database.GetPendingMigrations();
-    if (pendingMigrations.Any())
+    var pendingMigrations = dbContext.Database.GetPendingMigrations().ToList();
+    if (pendingMigrations.Count > 0)
     {
-        Console.WriteLine("Applying pending migrations...");
+        logger.LogInformation("Applying {Count} pending migrations", pendingMigrations.Count);
         dbContext.Database.Migrate();
-        Console.WriteLine("Migrations applied successfully.");
+        logger.LogInformation("Migrations applied successfully");
     }
     else
     {
-        Console.WriteLine("No pending migrations found.");
+        logger.LogInformation("No pending migrations found");
     }
 }
 

@@ -132,3 +132,6 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 
 30/04/26
 - Added DLQ table and renamed retries to attempts so it's more in line with what the column is actually used for, needed to adjust the logic so an attempt is incremented everytime the message is sent, this way it's actually on sent 5 times instead of being retried 5 and sent 6 times.
+
+05/05/26
+- Getting claude to implement the logging for the application, need to move logs from console to combined log store 
