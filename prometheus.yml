@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: controllers
+    static_configs:
+      - targets: ['controllers:9101']
+
+  - job_name: relay
+    static_configs:
+      - targets: ['relay:9102']
+
+  - job_name: worker-node
+    static_configs:
+      - targets: ['worker-node:9103']
+
+  - job_name: data
+    static_configs:
+      - targets: ['data:9104']

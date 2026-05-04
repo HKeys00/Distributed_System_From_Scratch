@@ -10,6 +10,7 @@ var builder = Host.CreateDefaultBuilder(args)
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(context.Configuration.GetConnectionString("DefaultConnection")));
         services.AddDbContextFactory<ApplicationDbContext>();
+        services.AddPrometheusMetrics(port: 9102);
         services.AddHostedService<Worker>();
     });
 

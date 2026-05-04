@@ -2,10 +2,12 @@ using Data;
 using Data.Models.Task;
 using Shared.Constants;
 using Shared.DTOs;
+using Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
 
@@ -22,7 +24,7 @@ namespace Relay
         private readonly IConfiguration _configuration;
         private readonly ILogger<Worker> _logger;
 
-        private readonly Dictionary<ulong, IWorkItem> _unAckedTasks;
+        private readonly Dictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
         private readonly HashSet<Guid> _pendingTasks;
 
 
@@ -61,7 +63,7 @@ namespace Relay
             _staleTimer.Enabled = true;
             _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
 
-            _unAckedTasks = new Dictionary<ulong, IWorkItem>();
+            _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
             _pendingTasks = new HashSet<Guid>();
         }
 
@@ -123,14 +125,17 @@ namespace Relay
                 ["DeliveryTag"] = args.DeliveryTag
             });
 
-            var removed = _unAckedTasks.Remove(args.DeliveryTag, out var task);
-            if (!removed || task == null)
+            var removed = _unAckedTasks.Remove(args.DeliveryTag, out var entry);
+            if (!removed)
             {
                 //Acking a task that has already either been re sent or marked as acked, either way ignore and keep going.
                 _logger.LogWarning("Ack received for task that has already been resent or marked as acked");
                 await Task.Yield();
                 return;
             }
+
+            var (task, publishedAt) = entry;
+            AppMetrics.Relay.OutboxPublishAckSeconds.Observe(Stopwatch.GetElapsedTime(publishedAt).TotalSeconds);
 
             using var taskScope = _logger.BeginScope(new Dictionary<string, object>
             {
@@ -167,6 +172,15 @@ namespace Relay
 
             _processingOutbox = true;
             await using var context = await _dbContextFactory.CreateDbContextAsync();
+
+            try
+            {
+                AppMetrics.Relay.OutboxDepth.Set(await context.Outbox.CountAsync());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not read outbox depth for metrics");
+            }
 
             int page = 1;
             const int pageSize = 5;
@@ -299,21 +313,26 @@ namespace Relay
                     ["Attempt"] = workItem.Attempt + 1
                 });
 
-                _unAckedTasks.Add(batchStartingNumber + (ulong)i, workItem);
+                var deliveryTag = batchStartingNumber + (ulong)i;
+                _unAckedTasks.Add(deliveryTag, (workItem, Stopwatch.GetTimestamp()));
                 try
                 {
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
                         body: JsonSerializer.SerializeToUtf8Bytes(message));
+                    AppMetrics.Relay.OutboxPublishes.WithLabels("success").Inc();
                     _logger.LogDebug("Published task to broker");
                 }
                 catch (Exception ex)
                 {
+                    _unAckedTasks.Remove(deliveryTag);
+                    AppMetrics.Relay.OutboxPublishes.WithLabels("fail").Inc();
                     _logger.LogError(ex, "Message failed to send across rabbit channel");
                     continue;
                 }
                 sentMessages.Add(workItem.TaskId);
             }
 
+            AppMetrics.Relay.OutboxPublishBatchSize.Observe(workItems.Count);
             return sentMessages;
         }
 

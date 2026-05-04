@@ -9,6 +9,8 @@ builder.Host.UseSeqLogging("Data");
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddPrometheusMetrics(port: 9104);
+
 var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {

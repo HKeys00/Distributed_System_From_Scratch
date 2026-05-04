@@ -48,6 +48,7 @@ namespace Controllers.Controllers
             if (pendingCount > _maxUnpublishedRequests)
             {
                 _logger.LogWarning("Failed to create task for {name}, too many requests pending.", nameof(Crawl));
+                AppMetrics.Controllers.TasksAccepted.WithLabels("throttled").Inc();
                 return StatusCode(429, "Too many requests. Please try again later.");
             }
 
@@ -67,6 +68,7 @@ namespace Controllers.Controllers
             if (exists != null)
             {
                 _logger.LogInformation("{url} already recently crawled, skipping", request.Url);
+                AppMetrics.Controllers.TasksAccepted.WithLabels("duplicate").Inc();
                 return Accepted(exists.TaskId);
             }
 
@@ -79,10 +81,12 @@ namespace Controllers.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error in crawl request");
+                AppMetrics.Controllers.TasksAccepted.WithLabels("error").Inc();
                 return StatusCode(500, $"Internal server error. {ex.Message}"); //String interpolation not very performant.
             }
 
             _logger.LogInformation("{name} Task created with id {id}", nameof(Crawl), item.TaskId);
+            AppMetrics.Controllers.TasksAccepted.WithLabels("accepted").Inc();
             return Accepted(item.TaskId);
         }
     }

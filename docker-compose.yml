@@ -23,6 +23,8 @@ services:
       dockerfile: Data/Dockerfile
     container_name: data
     working_dir: /app
+    ports:
+      - "9104:9104"
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
       Seq__ServerUrl: "http://seq:80"
@@ -61,6 +63,18 @@ services:
       timeout: 5s
       retries: 5
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    ports:
+      - "9090:9090"
+
   controllers:
     build:
       context: .
@@ -69,6 +83,7 @@ services:
     working_dir: /app
     ports:
       - "5001:5000"
+      - "9101:9101"
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:5000
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
@@ -85,6 +100,8 @@ services:
       dockerfile: Relay/Dockerfile
     container_name: relay
     working_dir: /app
+    ports:
+      - "9102:9102"
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
       Seq__ServerUrl: "http://seq:80"
@@ -102,6 +119,8 @@ services:
       dockerfile: Worker_Node/Dockerfile
     container_name: worker-node
     working_dir: /app
+    ports:
+      - "9103:9103"
     environment:
       NODE_ID: A
       DATA_DIR: /data
@@ -133,3 +152,4 @@ services:
 volumes:
   pgdata:
   seqdata:
+  prometheusdata:

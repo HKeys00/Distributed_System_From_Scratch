@@ -13,6 +13,7 @@ builder.Services.AddDbContextFactory<ApplicationDbContext>();
 
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<RabbitService>();
+builder.Services.AddPrometheusMetrics(port: 9103);
 builder.Services.AddHostedService<WebCrawlerService>();
 
 var app = builder.Build();

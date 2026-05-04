@@ -1,0 +1,66 @@
+using Prometheus;
+
+namespace Shared.Helpers;
+
+public static class AppMetrics
+{
+    public static class Controllers
+    {
+        public static readonly Counter TasksAccepted = Metrics.CreateCounter(
+            "controllers_tasks_accepted_total",
+            "Number of crawl requests received by the controller, labelled by outcome.",
+            new CounterConfiguration { LabelNames = new[] { "result" } });
+    }
+
+    public static class Relay
+    {
+        public static readonly Counter OutboxPublishes = Metrics.CreateCounter(
+            "relay_outbox_publishes_total",
+            "Number of outbox messages published to the broker, labelled by result.",
+            new CounterConfiguration { LabelNames = new[] { "result" } });
+
+        public static readonly Histogram OutboxPublishAckSeconds = Metrics.CreateHistogram(
+            "relay_outbox_publish_ack_seconds",
+            "Time between publishing a message and receiving the broker ack.",
+            new HistogramConfiguration
+            {
+                Buckets = Histogram.ExponentialBuckets(start: 0.001, factor: 2, count: 12)
+            });
+
+        public static readonly Histogram OutboxPublishBatchSize = Metrics.CreateHistogram(
+            "relay_outbox_publish_batch_size",
+            "Number of messages sent in a single publish batch.",
+            new HistogramConfiguration
+            {
+                Buckets = new double[] { 1, 5, 10, 25, 50, 100, 250 }
+            });
+
+        public static readonly Gauge OutboxDepth = Metrics.CreateGauge(
+            "relay_outbox_depth",
+            "Current number of unpublished items in the outbox view.");
+    }
+
+    public static class Worker
+    {
+        public static readonly Counter Fetches = Metrics.CreateCounter(
+            "worker_fetches_total",
+            "Number of crawl jobs processed, labelled by outcome.",
+            new CounterConfiguration { LabelNames = new[] { "outcome" } });
+
+        public static readonly Histogram FetchDurationSeconds = Metrics.CreateHistogram(
+            "worker_fetch_duration_seconds",
+            "Wall-clock duration of a single page fetch and parse.",
+            new HistogramConfiguration
+            {
+                Buckets = new double[] { 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 25, 30 }
+            });
+
+        public static readonly Counter Retries = Metrics.CreateCounter(
+            "worker_retries_total",
+            "Number of failed crawls scheduled for retry (non-terminal).");
+
+        public static readonly Counter DeadLettered = Metrics.CreateCounter(
+            "worker_dead_lettered_total",
+            "Number of tasks moved to the DLQ after exhausting retries.");
+    }
+}

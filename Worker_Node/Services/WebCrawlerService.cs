@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using RabbitMQ.Client.Events;
 using Shared.Constants;
 using Shared.DTOs;
+using Shared.Helpers;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -125,6 +127,7 @@ namespace Worker_Node.Services
                 if (job == null)
                 {
                     await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
+                    AppMetrics.Worker.Fetches.WithLabels("deserialize_error").Inc();
                     var raw = Encoding.UTF8.GetString(args.Body.ToArray());
                     if (raw.Length > 512)
                     {
@@ -136,6 +139,7 @@ namespace Worker_Node.Services
             } catch (Exception ex)
             {
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
+                AppMetrics.Worker.Fetches.WithLabels("deserialize_error").Inc();
                 _logger.LogError(ex, "Unexpected error occurred while deserializing message");
                 return;
             }
@@ -158,6 +162,7 @@ namespace Worker_Node.Services
             {
                 //Between creating the task and this worker receiving it, the site had been scraped.
                 _logger.LogInformation("Skipping crawl, idempotency id already recorded as success");
+                AppMetrics.Worker.Fetches.WithLabels("already_done").Inc();
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
@@ -166,21 +171,26 @@ namespace Worker_Node.Services
             {
                 //Duplicate message.
                 _logger.LogInformation("Skipping crawl, duplicate delivery for this attempt");
+                AppMetrics.Worker.Fetches.WithLabels("duplicate").Inc();
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
 
             string[]? childUrls;
+            var fetchStart = Stopwatch.GetTimestamp();
             try
             {
                 childUrls = await CrawlAsync(job.Url, CancellationToken.None);
                 childUrls = Array.Empty<string>(); //Test with only one task.
+                AppMetrics.Worker.FetchDurationSeconds.Observe(Stopwatch.GetElapsedTime(fetchStart).TotalSeconds);
                 _logger.LogInformation("Crawl completed with {ChildCount} child urls", childUrls.Length);
             }
             catch(HttpRequestException ex)
             {
+                AppMetrics.Worker.FetchDurationSeconds.Observe(Stopwatch.GetElapsedTime(fetchStart).TotalSeconds);
+                AppMetrics.Worker.Fetches.WithLabels("http_error").Inc();
                 _logger.LogWarning(ex, "Crawl returned status code {StatusCode}", ex.StatusCode);
-                
+
                 //TODO: Don't really like this being the workers job but fine for now
                 await using var transaction = await context.Database.BeginTransactionAsync();
 
@@ -194,6 +204,7 @@ namespace Worker_Node.Services
                         IdempotencyId = job.IdempotencyId
                     });
 
+                    AppMetrics.Worker.DeadLettered.Inc();
                     await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                     await context.SaveChangesAsync();
                     await transaction.CommitAsync();
@@ -225,7 +236,8 @@ namespace Worker_Node.Services
                 });
                 await context.SaveChangesAsync();
                 await transaction.CommitAsync();
-                
+
+                AppMetrics.Worker.Retries.Inc();
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
@@ -249,6 +261,7 @@ namespace Worker_Node.Services
                 return;
             }
 
+            AppMetrics.Worker.Fetches.WithLabels("success").Inc();
             _logger.LogInformation("Crawl persisted, {ChildCount} new tasks queued", childUrls.Length);
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
