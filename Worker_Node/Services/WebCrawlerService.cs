@@ -201,8 +201,6 @@ namespace Worker_Node.Services
 
                 if (job.Attempt == 5)
                 {       //DLQ
-                    _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Task moved to DLQ after {Attempt} attempts",
-                        job.CorrelationId, job.TaskId, job.Attempt);
                     await context.DLQ.AddAsync(new Dead()
                     {
                         TaskId = job.TaskId,
@@ -214,23 +212,18 @@ namespace Worker_Node.Services
                     await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                     await context.SaveChangesAsync();
                     await transaction.CommitAsync();
+
+                    _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Task moved to DLQ after {Attempt} attempts",
+                        job.CorrelationId, job.TaskId, job.Attempt);
                     return;
                 }
-
-                // await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
-                //     $@"UPDATE ""Tasks""                                                                                                                       
-                //         SET ""SentAt"" = NULL,                                                                                                                 
-                //             ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempt""))                                                        
-                //         WHERE ""TaskId"" = {job.TaskId}"
-                // );
 
                 await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
                     $@"UPDATE ""Tasks""                                                                                                                       
                         SET ""SentAt"" = NULL,                                                                                                                 
-                            ""NextAttemptAt"" = now() + (interval '10 seconds')                                                        
+                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempt""))                                                        
                         WHERE ""TaskId"" = {job.TaskId}"
                 );
-
 
                 context.Add(new Conflict()
                 {
@@ -242,6 +235,9 @@ namespace Worker_Node.Services
                 });
                 await context.SaveChangesAsync();
                 await transaction.CommitAsync();
+
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Added conflict for task at attempt {Attempt}", job.CorrelationId, job.TaskId, job.Attempt);
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Retrying Task, attempt number {Attempt}", job.CorrelationId, job.TaskId, job.Attempt + 1);
 
                 AppMetrics.Worker.Retries.Inc();
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
@@ -261,16 +257,14 @@ namespace Worker_Node.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to save changes to database",
-                    job.CorrelationId, job.TaskId);
+                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to save changes to database", job.CorrelationId, job.TaskId);
                 //TODO Publish to a retry queue rather than immdeiately retrying
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
                 return;
             }
 
             AppMetrics.Worker.Fetches.WithLabels("success").Inc();
-            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Crawl persisted, {ChildCount} new tasks queued",
-                job.CorrelationId, job.TaskId, childUrls.Length);
+            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Crawl marked as success, {ChildCount} new tasks queued", job.CorrelationId, job.TaskId, childUrls.Length);
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
 
