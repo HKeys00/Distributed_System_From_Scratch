@@ -149,10 +149,12 @@ namespace Relay
                 await context.Database.BeginTransactionAsync();
                 await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
                 await context.Database.CommitTransactionAsync();
-                _logger.LogInformation("Marked task as acked");
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Marked task as acked",
+                    task.CorrelationId, task.TaskId);
             } catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to ack task");
+                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to ack task",
+                    task.CorrelationId, task.TaskId);
             } finally
             {
                 _pendingTasks.Remove(task.TaskId);
@@ -335,13 +337,15 @@ namespace Relay
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
                         body: JsonSerializer.SerializeToUtf8Bytes(message));
                     AppMetrics.Relay.OutboxPublishes.WithLabels("success").Inc();
-                    _logger.LogDebug("Published task to broker");
+                    _logger.LogDebug("CorrelationId={CorrelationId} TaskId={TaskId} Published task to broker",
+                        workItem.CorrelationId, workItem.TaskId);
                 }
                 catch (Exception ex)
                 {
                     _unAckedTasks.Remove(deliveryTag);
                     AppMetrics.Relay.OutboxPublishes.WithLabels("fail").Inc();
-                    _logger.LogError(ex, "Message failed to send across rabbit channel");
+                    _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Message failed to send across rabbit channel",
+                        workItem.CorrelationId, workItem.TaskId);
                     continue;
                 }
                 sentMessages.Add(workItem.TaskId);

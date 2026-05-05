@@ -135,3 +135,8 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 
 05/05/26
 - Getting claude to implement the logging for the application, need to move logs from console to combined log store 
+- Again claude coming in clutch doing the super boring stuff like writing the chaos harness and implementing prometheus metrics
+
+06/06/26
+- Claude fixing the bugs it made in the chaos harness, will also get it to rewrite my log lines because the format is very inconsistent
+- Chaos harness passed, not able to follow a task all the way through the logs from start to finish so need to fix that

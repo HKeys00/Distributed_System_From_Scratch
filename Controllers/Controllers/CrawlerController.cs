@@ -43,18 +43,18 @@ namespace Controllers.Controllers
         [HttpPost]
         public async Task<IActionResult> Crawl([FromBody] CrawlRequest request, CancellationToken token)
         {
+            var correlationId = HttpContext.Items[CorrelationConstants.HttpContextItemKey] is Guid id
+                ? id
+                : Guid.NewGuid();
+
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             var pendingCount = await context.Outbox.CountAsync(token);
             if (pendingCount > _maxUnpublishedRequests)
             {
-                _logger.LogWarning("Failed to create task for {name}, too many requests pending.", nameof(Crawl));
+                _logger.LogWarning("CorrelationId={CorrelationId} Request throttled, too many pending tasks", correlationId);
                 AppMetrics.Controllers.TasksAccepted.WithLabels("throttled").Inc();
                 return StatusCode(429, "Too many requests. Please try again later.");
             }
-
-            var correlationId = HttpContext.Items[CorrelationConstants.HttpContextItemKey] is Guid id
-                ? id
-                : Guid.NewGuid();
 
             WorkItem item = new WorkItem()
             {
@@ -67,7 +67,7 @@ namespace Controllers.Controllers
             var exists = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == item.IdempotencyId);
             if (exists != null)
             {
-                _logger.LogInformation("{url} already recently crawled, skipping", request.Url);
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Url already recently crawled, skipping", correlationId, exists.TaskId);
                 AppMetrics.Controllers.TasksAccepted.WithLabels("duplicate").Inc();
                 return Accepted(exists.TaskId);
             }
@@ -80,12 +80,12 @@ namespace Controllers.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error in crawl request");
+                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to persist task", correlationId, item.TaskId);
                 AppMetrics.Controllers.TasksAccepted.WithLabels("error").Inc();
                 return StatusCode(500, $"Internal server error. {ex.Message}"); //String interpolation not very performant.
             }
 
-            _logger.LogInformation("{name} Task created with id {id}", nameof(Crawl), item.TaskId);
+            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Task created", correlationId, item.TaskId);
             AppMetrics.Controllers.TasksAccepted.WithLabels("accepted").Inc();
             return Accepted(item.TaskId);
         }

@@ -32,7 +32,9 @@ internal sealed class DbAccess
             SELECT
               (SELECT COUNT(*) FROM ""Successes"" WHERE ""TaskId"" = ANY(@ids)),
               (SELECT COUNT(*) FROM ""DLQ""       WHERE ""TaskId"" = ANY(@ids)),
-              (SELECT COUNT(*) FROM ""Tasks""     WHERE ""TaskId"" = ANY(@ids))",
+              (SELECT COUNT(*) FROM unnest(@ids) AS t(id)
+                 WHERE NOT EXISTS (SELECT 1 FROM ""Successes"" WHERE ""TaskId"" = t.id)
+                   AND NOT EXISTS (SELECT 1 FROM ""DLQ""       WHERE ""TaskId"" = t.id))",
             conn);
         cmd.Parameters.AddWithValue("ids", ids);
 
@@ -41,7 +43,7 @@ internal sealed class DbAccess
         return new TerminalCounts(
             Successes: reader.GetInt64(0),
             DeadLettered: reader.GetInt64(1),
-            StillInTasks: reader.GetInt64(2));
+            Stuck: reader.GetInt64(2));
     }
 
     public async Task<long> CountDuplicateSuccessesAsync(IReadOnlyCollection<Guid> taskIds)
@@ -60,7 +62,7 @@ internal sealed class DbAccess
     }
 }
 
-internal readonly record struct TerminalCounts(long Successes, long DeadLettered, long StillInTasks)
+internal readonly record struct TerminalCounts(long Successes, long DeadLettered, long Stuck)
 {
-    public long Terminal => Successes + DeadLettered;
+    public bool AllSettled => Stuck == 0;
 }

@@ -154,14 +154,16 @@ namespace Worker_Node.Services
                 ["DeliveryTag"] = args.DeliveryTag
             });
 
-            _logger.LogInformation("Received crawl job");
+            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Received crawl job",
+                job.CorrelationId, job.TaskId);
             await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
             if (existingSuccess != null)
             {
                 //Between creating the task and this worker receiving it, the site had been scraped.
-                _logger.LogInformation("Skipping crawl, idempotency id already recorded as success");
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Skipping crawl, idempotency id already recorded as success",
+                    job.CorrelationId, job.TaskId);
                 AppMetrics.Worker.Fetches.WithLabels("already_done").Inc();
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
@@ -170,7 +172,8 @@ namespace Worker_Node.Services
             if (existingFailure != null)
             {
                 //Duplicate message.
-                _logger.LogInformation("Skipping crawl, duplicate delivery for this attempt");
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Skipping crawl, duplicate delivery for this attempt",
+                    job.CorrelationId, job.TaskId);
                 AppMetrics.Worker.Fetches.WithLabels("duplicate").Inc();
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
@@ -183,20 +186,23 @@ namespace Worker_Node.Services
                 childUrls = await CrawlAsync(job.Url, CancellationToken.None);
                 childUrls = Array.Empty<string>(); //Test with only one task.
                 AppMetrics.Worker.FetchDurationSeconds.Observe(Stopwatch.GetElapsedTime(fetchStart).TotalSeconds);
-                _logger.LogInformation("Crawl completed with {ChildCount} child urls", childUrls.Length);
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Crawl completed with {ChildCount} child urls",
+                    job.CorrelationId, job.TaskId, childUrls.Length);
             }
             catch(HttpRequestException ex)
             {
                 AppMetrics.Worker.FetchDurationSeconds.Observe(Stopwatch.GetElapsedTime(fetchStart).TotalSeconds);
                 AppMetrics.Worker.Fetches.WithLabels("http_error").Inc();
-                _logger.LogWarning(ex, "Crawl returned status code {StatusCode}", ex.StatusCode);
+                _logger.LogWarning(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Crawl returned status code {StatusCode}",
+                    job.CorrelationId, job.TaskId, ex.StatusCode);
 
                 //TODO: Don't really like this being the workers job but fine for now
                 await using var transaction = await context.Database.BeginTransactionAsync();
 
                 if (job.Attempt == 5)
                 {       //DLQ
-                    _logger.LogWarning("Task moved to DLQ after {Attempt} attempts", job.Attempt);
+                    _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Task moved to DLQ after {Attempt} attempts",
+                        job.CorrelationId, job.TaskId, job.Attempt);
                     await context.DLQ.AddAsync(new Dead()
                     {
                         TaskId = job.TaskId,
@@ -255,14 +261,16 @@ namespace Worker_Node.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to save changes to database");
+                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to save changes to database",
+                    job.CorrelationId, job.TaskId);
                 //TODO Publish to a retry queue rather than immdeiately retrying
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
                 return;
             }
 
             AppMetrics.Worker.Fetches.WithLabels("success").Inc();
-            _logger.LogInformation("Crawl persisted, {ChildCount} new tasks queued", childUrls.Length);
+            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Crawl persisted, {ChildCount} new tasks queued",
+                job.CorrelationId, job.TaskId, childUrls.Length);
             await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
 

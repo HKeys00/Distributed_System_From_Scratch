@@ -43,7 +43,8 @@ namespace Controllers.Middleware
                 [CorrelationConstants.LogScopeKey] = correlationId
             }))
             {
-                _logger.LogDebug("Resolved correlation id from {Source}", headerSupplied ? "header" : "minted");
+                _logger.LogDebug("CorrelationId={CorrelationId} Resolved correlation id from {Source}",
+                    correlationId, headerSupplied ? "header" : "minted");
                 await _next(context);
             }
         }

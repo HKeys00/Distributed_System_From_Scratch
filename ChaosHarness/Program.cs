@@ -84,12 +84,12 @@ static async Task<bool> ChaosSigkillAsync(
             Console.WriteLine($"restarted {WorkerContainer}");
             killed = true;
         }
-        if (counts.Terminal >= ids.Count) break;
+        if (counts.AllSettled) break;
         await Task.Delay(TimeSpan.FromSeconds(1));
     }
 
     var final = await db.GetTerminalCountsAsync(ids);
-    Console.WriteLine($"final: successes={final.Successes} dlq={final.DeadLettered} remaining={final.StillInTasks}");
+    Console.WriteLine($"final: successes={final.Successes} dlq={final.DeadLettered} stuck={final.Stuck}");
     return AssertExpectation(ids.Count, final, Expectation.AllSuccess)
         && await AssertNoDuplicatesAsync(db, ids)
         && killed;
@@ -103,10 +103,10 @@ static async Task<TerminalCounts> PollUntilTerminalAsync(
     while (DateTime.UtcNow < deadline)
     {
         last = await db.GetTerminalCountsAsync(ids);
-        if (last.Terminal >= ids.Count) break;
+        if (last.AllSettled) break;
         await Task.Delay(TimeSpan.FromSeconds(1));
     }
-    Console.WriteLine($"final: successes={last.Successes} dlq={last.DeadLettered} remaining={last.StillInTasks}");
+    Console.WriteLine($"final: successes={last.Successes} dlq={last.DeadLettered} stuck={last.Stuck}");
     return last;
 }
 
@@ -114,13 +114,13 @@ static bool AssertExpectation(int submitted, TerminalCounts counts, Expectation 
 {
     bool ok = expect switch
     {
-        Expectation.AllSuccess        => counts.Successes == submitted && counts.DeadLettered == 0 && counts.StillInTasks == 0,
-        Expectation.AllDeadLettered   => counts.DeadLettered == submitted && counts.Successes == 0,
+        Expectation.AllSuccess        => counts.Successes == submitted && counts.DeadLettered == 0 && counts.Stuck == 0,
+        Expectation.AllDeadLettered   => counts.DeadLettered == submitted && counts.Successes == 0 && counts.Stuck == 0,
         _ => false
     };
     if (!ok)
     {
-        Console.WriteLine($"  invariant FAIL: expected {expect}, got successes={counts.Successes} dlq={counts.DeadLettered} remaining={counts.StillInTasks} (submitted={submitted})");
+        Console.WriteLine($"  invariant FAIL: expected {expect}, got successes={counts.Successes} dlq={counts.DeadLettered} stuck={counts.Stuck} (submitted={submitted})");
     }
     return ok;
 }
