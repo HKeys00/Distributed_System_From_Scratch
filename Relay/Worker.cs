@@ -216,7 +216,7 @@ namespace Relay
                     await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"Attempt\" = \"Attempt\" + 1 WHERE \"TaskId\" = {0}", id);
+                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), WHERE \"TaskId\" = {0}", id);
                     }
                     await context.Database.CommitTransactionAsync();
                 }
@@ -287,7 +287,7 @@ namespace Relay
                     await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"Attempt\" = \"Attempt\" + 1 WHERE \"TaskId\" = {0}", id);
+                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), WHERE \"TaskId\" = {0}", id);
                     }
                     await context.Database.CommitTransactionAsync();
                 }
@@ -319,7 +319,7 @@ namespace Relay
             for (int i = 0; i < workItems.Count; i++)
             {
                 var workItem = workItems[i];
-                var message = new CrawlMessage(workItem.TaskId, workItem.CorrelationId, workItem.IdempotencyId, workItem.Url, workItem.Attempt + 1);
+                var message = new CrawlMessage(workItem.TaskId, workItem.CorrelationId, workItem.IdempotencyId, workItem.Url, workItem.Attempt);
 
                 using var itemScope = _logger.BeginScope(new Dictionary<string, object>
                 {
@@ -327,7 +327,7 @@ namespace Relay
                     ["TaskId"] = workItem.TaskId,
                     ["IdempotencyId"] = workItem.IdempotencyId,
                     ["Url"] = workItem.Url,
-                    ["Attempt"] = workItem.Attempt + 1
+                    ["Attempt"] = workItem.Attempt
                 });
 
                 var deliveryTag = batchStartingNumber + (ulong)i;

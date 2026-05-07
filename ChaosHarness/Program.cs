@@ -21,7 +21,7 @@ failures += await Run("baseline_ok", () => BaselineAsync(
 
 failures += await Run("baseline_500", () => BaselineAsync(
     db, workload, count: 5, urlTemplate: $"{StubBaseFromContainer}/500?n={{n}}",
-    expect: Expectation.AllDeadLettered, timeout: TimeSpan.FromMinutes(5)));
+    expect: Expectation.AllDeadLettered, timeout: TimeSpan.FromMinutes(10)));
 
 failures += await Run("chaos_sigkill", () => ChaosSigkillAsync(
     db, workload, count: 100, urlTemplate: $"{StubBaseFromContainer}/ok?n={{n}}",

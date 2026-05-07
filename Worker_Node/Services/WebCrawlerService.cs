@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.RateLimiting;
 
 namespace Worker_Node.Services
 {
@@ -28,6 +29,7 @@ namespace Worker_Node.Services
         private readonly HttpClient _httpClient;
         private readonly ILogger<WebCrawlerService> _logger;
         private string? _consumerTag;
+        private PartitionedRateLimiter<string> _bucket;
 
         private const string UserAgent = "DistributedSystemCrawler/1.0 (+friendly-bot)";
         private static readonly TimeSpan PolitenessDelay = TimeSpan.FromSeconds(1);
@@ -62,6 +64,21 @@ namespace Worker_Node.Services
             _httpClient = httpClientFactory.CreateClient(nameof(WebCrawlerService));
             _httpClient.Timeout = RequestTimeout;
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+
+            _bucket = PartitionedRateLimiter.Create<string, string>(domain =>
+            {
+                   return RateLimitPartition.GetTokenBucketLimiter(
+                        partitionKey: domain,
+                        factory: key => new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = 5,
+                            TokensPerPeriod = 5,
+                            ReplenishmentPeriod = TimeSpan.FromSeconds(5),
+                            QueueLimit = 5,
+                            AutoReplenishment = true
+                        }
+                    );
+            });
         }
 
         #endregion
@@ -156,6 +173,23 @@ namespace Worker_Node.Services
 
             _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Received crawl job",
                 job.CorrelationId, job.TaskId);
+
+            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Attempting to aquire token for job", job.CorrelationId, job.TaskId);
+            
+            var uri = new Uri(job.Url);
+            var lease = await _bucket.AcquireAsync(uri.Host);
+            if (!lease.IsAcquired)
+            {
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Failed to aquire token for job", job.CorrelationId, job.TaskId);
+                if (lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retry))
+                
+
+                    {
+                        Console.WriteLine($"Retry after {retry.TotalSeconds}s");
+                    }
+            }
+
+
             await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);

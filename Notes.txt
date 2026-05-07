@@ -137,6 +137,12 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 - Getting claude to implement the logging for the application, need to move logs from console to combined log store 
 - Again claude coming in clutch doing the super boring stuff like writing the chaos harness and implementing prometheus metrics
 
-06/06/26
+06/05/26
 - Claude fixing the bugs it made in the chaos harness, will also get it to rewrite my log lines because the format is very inconsistent
 - Chaos harness passed, not able to follow a task all the way through the logs from start to finish so need to fix that
+
+07/06/26
+- Need to implement rate limiter before I can move onto phase 2 of my project plan, might be a good idea to write a blog post involving phase 1 just so I can get the ball rolling, also since I've got all of these notes maybe not a bad idea.
+- Trying to implement rate limiter I think my attempt column is going to be a problem, if deferrals are handled in such a way that they can circulate through the system more than 5 times, then the 'increment attempt when you leave the outbox' methodology I had won't work correctly.
+- So remove Attempt + 1 from the relay move that to the worker when it starts a task and acquires a token (I feel like the worker is still doing to much, handling DLQ, resets and now incrementing attempt)
+- Stale Task reaper can now write a conflict to the database with an appropriate message which is an improvement.
