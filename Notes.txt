@@ -146,3 +146,4 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 - Trying to implement rate limiter I think my attempt column is going to be a problem, if deferrals are handled in such a way that they can circulate through the system more than 5 times, then the 'increment attempt when you leave the outbox' methodology I had won't work correctly.
 - So remove Attempt + 1 from the relay move that to the worker when it starts a task and acquires a token (I feel like the worker is still doing to much, handling DLQ, resets and now incrementing attempt)
 - Stale Task reaper can now write a conflict to the database with an appropriate message which is an improvement.
+- Need to split out the OnMessageReceived method it's 200 lines long and getting a bit too big, might need to implement the repository pattern to move some of the logic out of the worker

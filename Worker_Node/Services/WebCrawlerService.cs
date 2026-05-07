@@ -178,19 +178,27 @@ namespace Worker_Node.Services
             
             var uri = new Uri(job.Url);
             var lease = await _bucket.AcquireAsync(uri.Host);
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
             if (!lease.IsAcquired)
             {
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Failed to aquire token for job", job.CorrelationId, job.TaskId);
-                if (lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retry))
                 
+                var retry = TimeSpan.FromSeconds(5);
+                lease.TryGetMetadata(MetadataName.RetryAfter, out retry);
+                
+                await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
+                    $@"UPDATE ""Tasks""                                                                                                                       
+                        SET ""SentAt"" = NULL,                                                                                                                 
+                            ""NextAttemptAt"" = now() + (interval '{retry.TotalSeconds} seconds')                                                        
+                        WHERE ""TaskId"" = {job.TaskId}"
+                );
 
-                    {
-                        Console.WriteLine($"Retry after {retry.TotalSeconds}s");
-                    }
+                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
+                await context.SaveChangesAsync();
+
+                return;
             }
-
-
-            await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
             if (existingSuccess != null)
@@ -202,6 +210,7 @@ namespace Worker_Node.Services
                 await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
+
             var existingFailure = await context.Conflicts.FirstOrDefaultAsync(c => c.TaskId == job.TaskId && c.Attempt == job.Attempt);
             if (existingFailure != null)
             {
