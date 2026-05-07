@@ -71,9 +71,9 @@ namespace Worker_Node.Services
                         partitionKey: domain,
                         factory: key => new TokenBucketRateLimiterOptions
                         {
-                            TokenLimit = 5,
-                            TokensPerPeriod = 5,
-                            ReplenishmentPeriod = TimeSpan.FromSeconds(5),
+                            TokenLimit = 1,
+                            TokensPerPeriod = 1,
+                            ReplenishmentPeriod = TimeSpan.FromSeconds(45),
                             QueueLimit = 5,
                             AutoReplenishment = true
                         }
@@ -137,7 +137,7 @@ namespace Worker_Node.Services
                 return;
             }
             
-            CrawlMessage? job = null;
+            CrawlMessage? job;
             try
             {
                 job = JsonSerializer.Deserialize<CrawlMessage>(args.Body.Span);
@@ -200,6 +200,23 @@ namespace Worker_Node.Services
                 return;
             }
 
+            try
+            {
+                await ProcessMessage(context, job);
+                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
+            } 
+            catch
+            {
+                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
+            } 
+            finally
+            {
+                lease.Dispose();
+            }
+        }
+
+        private async Task ProcessMessage(ApplicationDbContext context, CrawlMessage job)
+        {
             var existingSuccess = await context.Successes.FirstOrDefaultAsync(s => s.IdempotencyId == job.IdempotencyId);
             if (existingSuccess != null)
             {
@@ -207,7 +224,6 @@ namespace Worker_Node.Services
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Skipping crawl, idempotency id already recorded as success",
                     job.CorrelationId, job.TaskId);
                 AppMetrics.Worker.Fetches.WithLabels("already_done").Inc();
-                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
 
@@ -218,7 +234,6 @@ namespace Worker_Node.Services
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Skipping crawl, duplicate delivery for this attempt",
                     job.CorrelationId, job.TaskId);
                 AppMetrics.Worker.Fetches.WithLabels("duplicate").Inc();
-                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                 return;
             }
 
@@ -252,13 +267,12 @@ namespace Worker_Node.Services
                     });
 
                     AppMetrics.Worker.DeadLettered.Inc();
-                    await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
                     await context.SaveChangesAsync();
                     await transaction.CommitAsync();
 
                     _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Task moved to DLQ after {Attempt} attempts",
                         job.CorrelationId, job.TaskId, job.Attempt);
-                    return;
+                    throw;
                 }
 
                 await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
@@ -283,8 +297,7 @@ namespace Worker_Node.Services
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Retrying Task, attempt number {Attempt}", job.CorrelationId, job.TaskId, job.Attempt + 1);
 
                 AppMetrics.Worker.Retries.Inc();
-                await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
-                return;
+                throw;
             }
 
             await context.Successes.AddAsync(new Success(job.TaskId, job.CorrelationId, job.IdempotencyId));
@@ -302,13 +315,11 @@ namespace Worker_Node.Services
             {
                 _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to save changes to database", job.CorrelationId, job.TaskId);
                 //TODO Publish to a retry queue rather than immdeiately retrying
-                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
-                return;
+                throw;
             }
 
             AppMetrics.Worker.Fetches.WithLabels("success").Inc();
             _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Crawl marked as success, {ChildCount} new tasks queued", job.CorrelationId, job.TaskId, childUrls.Length);
-            await consumer.Channel.BasicAckAsync(args.DeliveryTag, false);
         }
 
         /// <summary>

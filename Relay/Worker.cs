@@ -10,6 +10,7 @@ using RabbitMQ.Client.Events;
 using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
+using Data.Models.Status;
 
 namespace Relay
 {
@@ -288,6 +289,23 @@ namespace Relay
                     foreach (var id in ids)
                     {
                         await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), WHERE \"TaskId\" = {0}", id);
+                        //Raising conflict for stale task retry.
+
+                        var job = await context.Tasks.FirstOrDefaultAsync(t => t.TaskId == id);
+                        if (job == null)
+                        {
+                            _logger.LogError("Failed to resubmit task {id}, task doesn't exist", id);
+                            continue;
+                        }
+
+                        context.Add(new Conflict()
+                        {
+                            TaskId = job.TaskId,
+                            CorrelationId = job.CorrelationId,
+                            IdempotencyId = job.IdempotencyId,
+                            Reason = "Stale reaper picked up and resubmitted task.",
+                            Attempt = job.Attempt
+                        });
                     }
                     await context.Database.CommitTransactionAsync();
                 }

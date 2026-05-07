@@ -27,6 +27,10 @@ failures += await Run("chaos_sigkill", () => ChaosSigkillAsync(
     db, workload, count: 100, urlTemplate: $"{StubBaseFromContainer}/ok?n={{n}}",
     timeout: TimeSpan.FromMinutes(5)));
 
+failures += await Run("rate_limit_same_domain", () => RateLimitAsync(
+    db, workload, count: 100, urlTemplate: $"{StubBaseFromContainer}/ok?id={{n}}&v={{n}}",
+    minElapsed: TimeSpan.FromSeconds(60), timeout: TimeSpan.FromMinutes(5)));
+
 Console.WriteLine();
 Console.WriteLine(failures == 0 ? "ALL SCENARIOS PASSED" : $"{failures} SCENARIO(S) FAILED");
 return failures == 0 ? 0 : 1;
@@ -93,6 +97,29 @@ static async Task<bool> ChaosSigkillAsync(
     return AssertExpectation(ids.Count, final, Expectation.AllSuccess)
         && await AssertNoDuplicatesAsync(db, ids)
         && killed;
+}
+
+static async Task<bool> RateLimitAsync(
+    DbAccess db, Workload workload, int count, string urlTemplate,
+    TimeSpan minElapsed, TimeSpan timeout)
+{
+    await db.TruncateAllAsync();
+    var ids = await workload.SubmitAsync(count, urlTemplate);
+    Console.WriteLine($"submitted {ids.Count} same-domain tasks with varying URLs");
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var counts = await PollUntilTerminalAsync(db, ids, timeout);
+    sw.Stop();
+    Console.WriteLine($"drain time: {sw.Elapsed.TotalSeconds:F1}s (expected >= {minElapsed.TotalSeconds:F0}s under rate limit)");
+
+    var throttled = sw.Elapsed >= minElapsed;
+    if (!throttled)
+    {
+        Console.WriteLine($"  invariant FAIL: drained in {sw.Elapsed.TotalSeconds:F1}s — rate limit not enforced");
+    }
+    return AssertExpectation(ids.Count, counts, Expectation.AllSuccess)
+        && await AssertNoDuplicatesAsync(db, ids)
+        && throttled;
 }
 
 static async Task<TerminalCounts> PollUntilTerminalAsync(
