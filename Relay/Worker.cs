@@ -130,7 +130,7 @@ namespace Relay
             if (!removed)
             {
                 //Acking a task that has already either been re sent or marked as acked, either way ignore and keep going.
-                _logger.LogWarning("Ack received for task that has already been resent or marked as acked");
+                //_logger.LogWarning("Ack received for task that has already been resent or marked as acked");
                 await Task.Yield();
                 return;
             }
@@ -150,11 +150,11 @@ namespace Relay
                 await context.Database.BeginTransactionAsync();
                 await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
                 await context.Database.CommitTransactionAsync();
-                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Marked task as acked",
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Task received by broker",
                     task.CorrelationId, task.TaskId);
             } catch (Exception ex)
             {
-                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to ack task",
+                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to mark task as published",
                     task.CorrelationId, task.TaskId);
             } finally
             {
@@ -217,7 +217,7 @@ namespace Relay
                     await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), WHERE \"TaskId\" = {0}", id);
+                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
                     }
                     await context.Database.CommitTransactionAsync();
                 }
@@ -288,7 +288,7 @@ namespace Relay
                     await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), WHERE \"TaskId\" = {0}", id);
+                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
                         //Raising conflict for stale task retry.
 
                         var job = await context.Tasks.FirstOrDefaultAsync(t => t.TaskId == id);

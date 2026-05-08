@@ -73,8 +73,8 @@ namespace Worker_Node.Services
                         {
                             TokenLimit = 1,
                             TokensPerPeriod = 1,
-                            ReplenishmentPeriod = TimeSpan.FromSeconds(45),
-                            QueueLimit = 5,
+                            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+                            QueueLimit = 0,
                             AutoReplenishment = true
                         }
                     );
@@ -187,19 +187,21 @@ namespace Worker_Node.Services
                 var retry = TimeSpan.FromSeconds(5);
                 lease.TryGetMetadata(MetadataName.RetryAfter, out retry);
                 
-                await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
-                    $@"UPDATE ""Tasks""                                                                                                                       
-                        SET ""SentAt"" = NULL,                                                                                                                 
-                            ""NextAttemptAt"" = now() + (interval '{retry.TotalSeconds} seconds')                                                        
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $@"UPDATE ""Tasks""
+                        SET ""SentAt"" = NULL,
+                            ""NextAttemptAt"" = now() + ({retry.TotalSeconds} * interval '1 second')
                         WHERE ""TaskId"" = {job.TaskId}"
                 );
 
-                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
+                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
                 await context.SaveChangesAsync();
 
+                lease.Dispose();
                 return;
             }
 
+            _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Aquired token for job", job.CorrelationId, job.TaskId);
             try
             {
                 await ProcessMessage(context, job);
