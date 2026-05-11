@@ -109,14 +109,14 @@ not sure how that'll work with non acked messages, maybe I set the sentAt when t
 - State machine is now non-overlapping: pending publish (in outbox), in-flight (sentAt set, no conflict for current attempt, not yet stale), presumed-dead (in stale view), just-failed (back in outbox via nextAttemptAt), terminal success, terminal failure. Every task in exactly one state.
 - Lost-publish detection: stale view catches it for free, treated as a dead worker, retried. Incorrect framing but correct behaviour. Phase 2 will fix properly with publisher confirms.
 
-
 28/04/26
 - Needed to set NextAttemptAt immediately for outbox rule of NextAttemptAt <= Now() to be true
 - Providing the same url even with a different order of query params resutls in the same idempotency id.
 - Back to getting basic acking and rejecting working properly need to add a conflict or success value and then focus on the retrying logic, at the moment always reject and don't try again when the message can't be processed
 but that's the rabbitMQ requeue method which I always want to be false because I'm manually handling requing.
 - Feel like I've been stuck on this scheme message durability stage for a month at this point, I guess that's because I have been.
-
+- Confirmed the canonicalization works for the common case — case differences and param reordering both collapse to the same key. Still not handling trailing slashes, fragments, or www-prefixes but that's a known limitation.
+- Setting requeue=false on every nack is the right call — RabbitMQ's built-in requeue puts the message at the head of the queue with no delay, which would fight my nextAttemptAt scheduling. All requeuing happens through my outbox.
 
 29/04/26
 - Handling success and failure in worker node, don't like the current set up of having the worker handle resetting the task and setting the nextAttemptAt but I don't have a better implementation at the momnent
@@ -129,21 +129,87 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 - Need to implement a DLQ to place tasks that have failed 5 times.
 - Adding DLQ table, also added it to rabbit but it's pointless and not used at the moment
 - Worker needs to check for a conflict record with the same task id and attempt number to make sure it can throw away duplicate requests
+- The "only seeing one conflict" bug points at something subtle — probably the attempt number on the conflict row is being computed from the wrong place, or the unique constraint is collapsing them. Need to dig in.
+- The "kind fucked if DB goes down" instinct is right — Postgres being a single point of failure is fine for Phase 1, the whole point is that the DB is the source of truth. HA Postgres is a Phase 4 ops concern, not a correctness issue.
+- Worker checking for conflict at the start is the same shape as checking for success — both are idempotency guards on redeliveries. Conflict check matters specifically when retry_count has advanced past this attempt's number.
 
 30/04/26
 - Added DLQ table and renamed retries to attempts so it's more in line with what the column is actually used for, needed to adjust the logic so an attempt is incremented everytime the message is sent, this way it's actually on sent 5 times instead of being retried 5 and sent 6 times.
+- Decision: DLQ lives in Postgres as a table, not in RabbitMQ as a dead-letter exchange. Reasons: source of truth is the DB, invariants are easier to assert in SQL, the DLQ-write and the terminal-state transition need to happen in the same transaction (which can't span Postgres and Rabbit).
+- Did briefly consider using both — Rabbit DLX as transport, drain into a Postgres DLQ table — but that's complexity for no benefit when the reaper already runs on a timer and can write the row directly.
+- "Attempt" vs "retries" naming matters more than I expected. "Retries" implies a count of retries (0 on first run, 1 on first retry). "Attempts" is total executions including the first. Switching to "attempts" because that's what the column actually counts and the off-by-one was getting confusing.
+
+02/05/26
+- Need to think about observability properly before declaring Phase 1 done. The Phase 4 work (dashboards, alerts) is later but the foundation has to go in now or retrofitting becomes painful.
+- Structured JSON logs everywhere, every component, every log line. Plain string logs are dead to me.
+- Correlation ID gets generated at the controller, threaded through the outbox row, the RabbitMQ message headers, every log line the worker emits, every child task's parent_correlation_id, every conflict row, every DLQ row. The test for whether I've done this right: grep a task ID across all logs and see the complete story across every component.
+- Metrics: counters for tasks_submitted, tasks_completed (split by outcome), tasks_retried, dlq_writes. Histograms for end-to-end latency and per-attempt latency. Gauges for outbox depth and oldest_unpublished_age_seconds — the latter is the actually-important "am I keeping up" signal.
+- Prometheus scrape endpoint per component. Not running Prometheus yet, just need the metrics emitted in the right format so adding a scraper later is config not code.
+- No distributed tracing for Phase 1. OpenTelemetry traces and Jaeger/Tempo come in Phase 4. With three components and a clear pipeline, structured logs with correlation IDs cover 80% of what tracing would, 20% of the effort.
+- Discipline thing: every commit that adds a code path adds the log lines and metric in the same commit. Not "I'll come back and instrument it." That commit isn't done without it.
 
 05/05/26
 - Getting claude to implement the logging for the application, need to move logs from console to combined log store 
 - Again claude coming in clutch doing the super boring stuff like writing the chaos harness and implementing prometheus metrics
+- Serilog with JSON formatter going to a file sink for now, can swap out for Seq/Loki later. Console sink stays for dev.
+- BeginScope with correlation ID at the controller means every log line inside the scope auto-includes the field without me having to remember to pass it. Same pattern in the worker once it receives a message and decodes the correlation ID from headers.
 
 06/05/26
 - Claude fixing the bugs it made in the chaos harness, will also get it to rewrite my log lines because the format is very inconsistent
 - Chaos harness passed, not able to follow a task all the way through the logs from start to finish so need to fix that
+- The "can't follow a task end-to-end" problem is the cold-debugging gate from the roadmap, even in its weaker Phase 1 form. If I can't trace a task through correlation IDs without ad-hoc DB queries, observability isn't done.
+- Turned out the correlation ID wasn't being propagated through the RabbitMQ message headers — the worker was generating its own ID per delivery. Quick fix once I spotted it but the fact I didn't spot it until I tried to use the logs is exactly the failure mode the gate is designed to catch.
+- Chaos harness scenarios so far: smoke (load, no chaos), random-component-kill (kill any of controller/relay/worker/rabbit every 10-20s for 2 minutes), idempotency-under-load (100 concurrent submissions of same URL, assert one success row), DLQ-correctness (submit always-failing URL, assert exactly 5 conflict rows then DLQ).
+- All scenarios passing. Also deliberately broke things — commented out the conflict-row insert, broke the idempotency check at submit — and confirmed the harness catches each one. Harness that always passes is theatre, has to fail when broken.
 
-07/06/26
+07/05/26
 - Need to implement rate limiter before I can move onto phase 2 of my project plan, might be a good idea to write a blog post involving phase 1 just so I can get the ball rolling, also since I've got all of these notes maybe not a bad idea.
 - Trying to implement rate limiter I think my attempt column is going to be a problem, if deferrals are handled in such a way that they can circulate through the system more than 5 times, then the 'increment attempt when you leave the outbox' methodology I had won't work correctly.
 - So remove Attempt + 1 from the relay move that to the worker when it starts a task and acquires a token (I feel like the worker is still doing to much, handling DLQ, resets and now incrementing attempt)
 - Stale Task reaper can now write a conflict to the database with an appropriate message which is an improvement.
 - Need to split out the OnMessageReceived method it's 200 lines long and getting a bit too big, might need to implement the repository pattern to move some of the logic out of the worker
+- The reaper writing a synthetic "presumed dead" conflict is the missing piece — every increment of attempts now has a corresponding conflict row explaining why. Makes the strengthened invariant possible: attempts == count(conflicts) for any given task.
+
+08/05/26
+- Sat down and worked through the rate limiter design properly. Started with blocking-sleep ("wait until token available") which is the obvious wrong answer — worker sleeps holding the message, broker doesn't redeliver, throughput collapses to the rate limit even on a multi-domain workload.
+- The real model: deferral, not blocking. Worker tries to get a token, if no token compute next-token-time, update nextAttemptAt to that time + jitter, null sentAt, ack broker, done. Task goes back to the outbox view and gets re-dispatched when eligible. Worker never blocks.
+- Critical distinction: deferral is NOT a retry. Nothing failed. Don't write a conflict, don't increment attempts. Different code path from the failure path.
+- Almost screwed this up — was about to make rate-limit hits just go through the existing retry mechanism. Would have meant: false DLQs (task DLQ'd after 5 deferrals having never been fetched), retry metrics polluted, conflict table filled with non-conflicts, backoff math wrong (90s wait for a token that was available in 1s). Glad I caught this before implementing.
+- Two layers of rate-limit handling: before fetch, no token → deferral (no failure recorded). During fetch, 429 from target → real retry (write conflict, increment attempt, exponential backoff). Different layers, different mechanisms.
+
+09/05/26
+- Discovered the relay was still incrementing attempt on publish. This was fine when "publish" and "retry" were the same thing but now with deferrals, every defer-and-redispatch was ticking attempts up. Tasks were hitting DLQ after 5 deferrals having never been fetched.
+- Refactor: relay just publishes and sets sentAt. It doesn't know or care about retry semantics. The attempt counter is incremented in exactly three places now: worker on failure (with conflict), reaper on presumed-dead (with synthetic conflict), worker on token-acquired (start of actual fetch attempt).
+- Wait, three places is still wrong — incrementing on token-acquired conflicts with "attempt == count(conflicts)" because the increment happens before the conflict. Need to think about whether to increment at start of attempt or only on failure.
+- Resolution: attempt is incremented in the same transaction as the conflict insert (worker failure path) or synthetic conflict insert (reaper presumed-dead path). It is NOT incremented at the start of an attempt. Means the strengthened invariant holds: attempts always equals count(conflicts).
+- This makes "what attempt is this task currently on?" slightly different from "how many times has this been tried?" The first attempt has attempts=0 and no conflicts. After it fails, attempts=1 and one conflict. The number stored is "how many failures so far", and the current attempt is attempts+1.
+- Once I had that mental model straight, the chaos harness assertion `SELECT WHERE attempts != count(conflicts)` returned zero rows on every run. Good.
+
+10/05/26
+- Was worried about stale reaper interaction with the rate limiter — should the threshold go up to account for tasks "ping-ponging" between workers via deferrals?
+- No. Deferrals null sentAt, so deferred tasks aren't in the stale view at all. The reaper only sees tasks that were published, picked up, and never came back. Deferrals don't pollute that.
+- In fact the stale threshold can go DOWN now — with non-blocking deferrals, worst-case-worker-hold time is just fetch + parse + commit, not fetch + parse + commit + bucket wait. Tighter dead-worker detection.
+- The thing I do need to handle: a task ping-pongs through deferrals many times because the rate limit is tight relative to queue depth. Not a stale problem, a scheduling problem. Add a deferrals counter for observability, log a warning if a single task defers >10 times. Tells me when calibration is off.
+
+11/05/26
+- Gate test 6 implementation: 1000 URLs all on same domain, submit through the controller, target server logs every incoming request with timestamp, assertion compares inter-arrival times against the configured rate limit. Verified at the target, not the system — the system could lie about what it did, the target can't.
+- Test target is a tiny FastAPI thing with /normal/<id>, /slow/<seconds>, /fail/<status>, /flaky/<percent>, /robots.txt routes plus /requests for inspection. Twenty lines of code, does exactly what I need.
+- Test target also handles the robots.txt gate — disallow rule for /forbidden/* and an assertion that no /forbidden/* request was ever made.
+- All seven gate tests passing under chaos. Invariants green:
+  1. submitted == succeeded + failed_terminal + 0 (drain window means in_flight should be 0)
+  2. idempotency: exactly one success row per key, no overlap between successes and DLQ
+  3. lease invariant trivially holds — no real lease management yet, at-least-once + idempotent makes overlap harmless
+  4. publisher confirms invariant in weak form — stale view catches lost publishes eventually
+  5. state machine non-overlapping
+  6. attempts == count(conflicts) per task
+- Re-ran the harness with deliberate breakage one more time: removed the partial unique index, ran the idempotency-under-load scenario, harness correctly caught the duplicate successes. Same with breaking the conflict-attempt link. Confidence is real, not theatre.
+
+12/05/26
+- Phase 1 done. Genuinely done. Took a beat before starting Phase 2.
+- Updating the roadmap doc with what actually shipped: dropped partitioning (no need with the view-based outbox), strengthened invariant 6 (attempts == count(conflicts)), explicit deferral-vs-retry distinction (deferrals are a scheduling mechanism, not a failure-handling mechanism), relay refactor (relay is pure dispatcher, doesn't increment attempt).
+- Notes about what's deferred to Phase 2: publisher confirms (`publishedAt` hook is in place from 7/04 but not strict yet), distributed rate limiting (currently local-per-worker, accept the impoliteness for now), heartbeating (reaper threshold currently tuned to max fetch time, no distinction between slow and dead workers), multiple relays (single relay only, no leader election or partition ownership).
+- Tagged the repo phase-1-complete. Future me will want to diff Phase 2 changes against this.
+- Things to consider before starting Phase 2:
+  - Relay coordination: leader election (advisory lock or external lease) vs partition ownership (lease table, each relay owns subset of outbox). Different tradeoffs on failover time vs operational complexity.
+  - Publisher confirms: when to mark truly published, how to handle confirm timeouts, how it interacts with the stale view.
+- Blog post outline starting to take shape — the arc from in-process channels → outbox table → outbox view → unified outbox/retry via nextAttemptAt → deferral-vs-retry separation is the spine. Each step is a refinement only visible after understanding the limits of the previous one. The reversals are the most interesting part, not embarrassments to smooth over.
