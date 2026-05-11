@@ -85,6 +85,7 @@ namespace Data.Models.Task
         public WorkItem(string url)
         {
             IdempotencyId = url.HashUrl();
+            CorrelationId = Guid.NewGuid();
             TaskId = Guid.NewGuid();
             Url = url;
         }

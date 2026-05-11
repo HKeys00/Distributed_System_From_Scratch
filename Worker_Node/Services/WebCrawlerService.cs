@@ -184,9 +184,10 @@ namespace Worker_Node.Services
             {
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Failed to aquire token for job", job.CorrelationId, job.TaskId);
                 
+                var random = new Random();
                 var retry = TimeSpan.FromSeconds(5);
                 lease.TryGetMetadata(MetadataName.RetryAfter, out retry);
-                
+                retry.Add(TimeSpan.FromSeconds(random.Next(10)));
                 await context.Database.ExecuteSqlInterpolatedAsync(
                     $@"UPDATE ""Tasks""
                         SET ""SentAt"" = NULL,
@@ -209,7 +210,7 @@ namespace Worker_Node.Services
             } 
             catch
             {
-                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, true);
+                await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
             } 
             finally
             {
@@ -233,8 +234,8 @@ namespace Worker_Node.Services
             if (existingFailure != null)
             {
                 //Duplicate message.
-                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Skipping crawl, duplicate delivery for this attempt",
-                    job.CorrelationId, job.TaskId);
+                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Skipping crawl, duplicate delivery for this attempt {attempt}",
+                    job.CorrelationId, job.TaskId, job.Attempt);
                 AppMetrics.Worker.Fetches.WithLabels("duplicate").Inc();
                 return;
             }
@@ -244,7 +245,6 @@ namespace Worker_Node.Services
             try
             {
                 childUrls = await CrawlAsync(job.Url, CancellationToken.None);
-                childUrls = Array.Empty<string>(); //Test with only one task.
                 AppMetrics.Worker.FetchDurationSeconds.Observe(Stopwatch.GetElapsedTime(fetchStart).TotalSeconds);
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Crawl completed with {ChildCount} child urls",
                     job.CorrelationId, job.TaskId, childUrls.Length);
@@ -253,8 +253,9 @@ namespace Worker_Node.Services
             {
                 AppMetrics.Worker.FetchDurationSeconds.Observe(Stopwatch.GetElapsedTime(fetchStart).TotalSeconds);
                 AppMetrics.Worker.Fetches.WithLabels("http_error").Inc();
-                _logger.LogWarning(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Crawl returned status code {StatusCode}",
-                    job.CorrelationId, job.TaskId, ex.StatusCode);
+                //Commenting this out for now because logs are getting messy
+                // _logger.LogWarning(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Crawl returned status code {StatusCode}",
+                //     job.CorrelationId, job.TaskId, ex.StatusCode);
 
                 //TODO: Don't really like this being the workers job but fine for now
                 await using var transaction = await context.Database.BeginTransactionAsync();
@@ -280,7 +281,8 @@ namespace Worker_Node.Services
                 await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
                     $@"UPDATE ""Tasks""                                                                                                                       
                         SET ""SentAt"" = NULL,                                                                                                                 
-                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempt""))                                                        
+                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempt"")),
+                            ""Attempt"" = ""Attempt"" + 1                                                    
                         WHERE ""TaskId"" = {job.TaskId}"
                 );
 
