@@ -213,3 +213,6 @@ but that's the rabbitMQ requeue method which I always want to be false because I
   - Relay coordination: leader election (advisory lock or external lease) vs partition ownership (lease table, each relay owns subset of outbox). Different tradeoffs on failover time vs operational complexity.
   - Publisher confirms: when to mark truly published, how to handle confirm timeouts, how it interacts with the stale view.
 - Blog post outline starting to take shape — the arc from in-process channels → outbox table → outbox view → unified outbox/retry via nextAttemptAt → deferral-vs-retry separation is the spine. Each step is a refinement only visible after understanding the limits of the previous one. The reversals are the most interesting part, not embarrassments to smooth over.
+
+13/05/26
+- Going to work on the blog post until I finish that and then I'll start working on phase 2
