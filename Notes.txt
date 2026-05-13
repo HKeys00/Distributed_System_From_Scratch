@@ -216,3 +216,6 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 
 13/05/26
 - Going to work on the blog post until I finish that and then I'll start working on phase 2
+
+14/05/26
+- Finished first draft of blog post, that didn't take me very long so I'll probably write all of phase 1 across 2 or 3 posts and then jump onto phase 2
