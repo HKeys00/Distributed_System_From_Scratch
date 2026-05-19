@@ -228,3 +228,6 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 
 19/05/26
 - MORE BLOG POST WRITING
+
+20/05/26
+- This is kind of exhausting, part 2 finished, still need part 3 and 4
