@@ -234,3 +234,4 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 
 26/05/26
 - RELEASE ME
+- Part 3 of phase one is done, still got part 4 and then I can FINALLY get onto phase 2
