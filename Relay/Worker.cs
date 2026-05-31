@@ -168,6 +168,8 @@ namespace Relay
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
+            return;
+
             if (_processingOutbox)
             {
                 return;
@@ -239,6 +241,7 @@ namespace Relay
         /// </summary>
         private async Task OnProcessStaleTasks()
         {
+            return;
             if (_processingStale)
             {
                 return;
