@@ -257,3 +257,6 @@ Statement timeouts and how they differ from connection timeouts
 How to inspect held advisory locks from another session (pg_locks system view)
 
 - One I get a solid understanding of these I can properly get started
+- Actually a lot of this isn't 100% necessary so getting started now
+- Working out what connections in my application are long lasting, seems like the connection used to call LISTEN is the only one that is tied to the lifetime of the relay worker
+- So need to acquire a session level advisory lock with this connection

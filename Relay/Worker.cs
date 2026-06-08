@@ -18,6 +18,7 @@ namespace Relay
     {
         #region Fields
 
+        private NpgsqlConnection? _dbConnection;
         private IConnection? _rabbitConnection;
         private IChannel? _rabbitChannel;
 
@@ -34,6 +35,7 @@ namespace Relay
 
         private bool _processingOutbox;
         private bool _processingStale;
+        private bool _lockAquired;
 
         #endregion
 
@@ -79,10 +81,10 @@ namespace Relay
             
             _rabbitConnection = await factory.CreateConnectionAsync(stoppingToken);
             
-            await using var connection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
-            await connection.OpenAsync(stoppingToken);
-            connection.Notification += OnNotify;
-            await using (var cmd = new NpgsqlCommand("LISTEN task_channel", connection))
+            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
+            await _dbConnection.OpenAsync(stoppingToken);
+            _dbConnection.Notification += OnNotify;
+            await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
             {
                 try
                 {
@@ -96,10 +98,12 @@ namespace Relay
             await OnProcessOutboxQueue();
             while (!stoppingToken.IsCancellationRequested)
             {
-                await connection
+                await _dbConnection
                     .WaitAsync(stoppingToken)
                     .ConfigureAwait(false);
             }
+
+            await _dbConnection.DisposeAsync();
         }
 
         /// <summary>
@@ -160,6 +164,17 @@ namespace Relay
             {
                 _pendingTasks.Remove(task.TaskId);
             }
+        }
+
+        private async Task OnTryAquireLock()
+        {
+            if (_lockAquired)
+            {
+                await Task.Yield();
+                return;
+            }
+
+
         }
 
         /// <summary>

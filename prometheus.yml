@@ -8,8 +8,11 @@ scrape_configs:
       - targets: ['controllers:9101']
 
   - job_name: relay
-    static_configs:
-      - targets: ['relay:9102']
+    dns_sd_configs:
+      - names: ['relay']
+        type: A
+        port: 9102
+        refresh_interval: 15s
 
   - job_name: worker-node
     static_configs:
