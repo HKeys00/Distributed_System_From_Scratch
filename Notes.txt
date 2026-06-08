@@ -238,3 +238,22 @@ but that's the rabbitMQ requeue method which I always want to be false because I
 
 1/06/26
 - Finally onto phase 2, step one is learning about Postgres connections and advisory locks
+
+09/06/26
+- Well that's been a turbulent week
+- Starting phase 2 with the following pre req learnings
+Sub-topics to learn:
+
+What a Postgres session is and how it maps to a TCP connection
+Connection lifecycle: establishment, idle, termination (clean vs unclean)
+Session-scoped vs transaction-scoped advisory locks (pg_advisory_lock vs pg_advisory_xact_lock, and the try_ variants)
+How advisory lock ownership is tied to the session
+What happens to a session-scoped lock on: clean disconnect, process SIGKILL, network partition, process hang with live TCP
+TCP keepalive: what it is, default values on Linux, the three relevant settings (tcp_keepalives_idle, tcp_keepalives_interval, tcp_keepalives_count)
+Where keepalive settings can be configured: OS level, Postgres server level, libpq/client level
+Connection pools (what they are, why the lock connection cannot come from one)
+In .NET/Npgsql specifically: how to obtain a connection that bypasses the pool, or a dedicated NpgsqlConnection held open for the process lifetime
+Statement timeouts and how they differ from connection timeouts
+How to inspect held advisory locks from another session (pg_locks system view)
+
+- One I get a solid understanding of these I can properly get started
