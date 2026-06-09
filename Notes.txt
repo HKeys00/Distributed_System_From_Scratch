@@ -398,5 +398,187 @@ How to inspect held advisory locks from another session (pg_locks system view)
                                                                                                                                                           
   Sketch those and you'll find the design collapses into something quite small.                                                                             
                                                                                          
+Ok so there would be a table called leader or something with a single row, which would be last_seen_at and PID. To start the nodes would attempt to get   
+  the lock (this would be staggered randomly) the node that gets the lock would be marked as the leader, it will continuously update that row with the      
+  last_seen_at and it's PID. The challengers would poll it every N seconds, if the last_seen_at is older then X it would kill a transaction and try to get  
+  the lock and then start writing to the table                                                                                                              
+                                                                                                                                                            
+⏺ Good sketch — the overall shape works. Let me push on a few details where the design needs sharpening:                                                    
+                                                                                                                                                          
+  1. "Staggered randomly" — do you actually need that?
+                                                                                                                                                            
+  pg_try_advisory_lock is atomic. If all three nodes call it in the same millisecond, one wins, two return false instantly. No collisions, no retries       
+  needed. Where did the staggering instinct come from, and what would it cost you in startup latency? (Hint: you don't need it. Trust the lock.)            
+                                                                                                                                                            
+  2. Whose clock?                                                                                                                                         
 
+  You said "if last_seen_at is older than X." Older according to whose clock? If the leader writes now() from its own machine and the challenger compares   
+  against its own now(), you've got clock skew between containers. What's the cheapest fix? (Hint: there's one clock in this system whose opinion is the
+  only one that matters, and all three nodes are already talking to it.)                                                                                    
+                                                                                                                                                          
+  3. The read-then-kill race
+
+  Trace this:
+  - Challenger A reads the row, sees PID=100, last_seen_at is stale.
+  - Meanwhile, challenger B already detected the same stale heartbeat, killed PID 100, acquired the lock, became leader, and is about to write its own      
+  PID=200 to the row.                                                                                                                                 
+  - A now calls pg_terminate_backend(100). What happens? Is it harmful?                                                                                     
+  - A then calls pg_try_advisory_lock(...). What happens?                                                                                                 
+                                                                                                                                                            
+  Does A's stale view cause any real damage? Walk through it and you'll see whether you need extra protection or whether the lock handles it.             
+                                                                                                                                                            
+  4. Order of operations for the new leader                                                                                                               
+                                                                                                                                                            
+  When a challenger takes over, does it:                                                                                                                    
+  - (a) acquire the lock, then UPDATE the row with its own PID, or
+  - (b) UPDATE the row, then acquire the lock?                                                                                                              
+                                                                                                                                                          
+  One of these is safe and one has a window where the row claims you're the leader but you don't hold the lock. Which is which, and why?                    
+                                                                                                                                                            
+  5. The "old leader pauses and returns" case — trace it end to end                                                                                         
+                                                                                                                                                            
+  This is the scenario that started this whole thread. Walk through:                                                                                        
+  - Old leader has a long GC pause. Its session at Postgres is technically still alive (TCP-wise).                                                        
+  - After X seconds, challenger calls pg_terminate_backend(old_pid).                                                                                        
+  - Old leader wakes up. What's the state of its database connection now? What happens the next time its code tries UPDATE leader_row SET last_seen_at =  
+  now()?                                                                                                                                                    
+                                                                                                                                                            
+  Is there any path where the old leader can successfully write to the leader row after being deposed? If yes, what's the fix? If no, what's the property of
+   Postgres that makes it impossible?                                                                                                                       
+                                                                                                                                                          
+  6. The leader's own heartbeat as a liveness check                                                                                                         
+                                                                                                                                                          
+  Here's a nice property worth noticing: if the leader's heartbeat statement runs on the same session that holds the advisory lock, then "I can successfully
+   send a heartbeat" implies "I still hold the lock." You don't need a separate "do I still hold this?" check. What does that mean for how you should
+  structure the leader's connection — pooled DbContext, or something else?                                                                                  
+                                                                                                                                                          
+  Sketch SQL for: (a) the leader's per-N-seconds heartbeat statement, (b) the challenger's "is the leader dead?" check, (c) the challenger's takeover       
+  sequence. Let me see those.
+                                                                                                                                                            
+✻ Worked for 56s                                                                                                                                          
+                                                                                                                                  
+❯ 1. You're right the staggered isn't really necessary. 2. I'd be using clock_timestamp() like I'm using everywhere else in the project 3. It would result  
+  in a potentially healthy challenger having their connection killed, A's attempt to get the lock wouldn't do anything but there would need to be handling  
+  if a challengers connection is killed for no reason. 4. It would aquire the lock then write 5. The leader pause and return should be a no-op since it no  
+  longer holds the lock 6. I understand the implication, I still don't fully understand how session locks work, how I define the scope of a lock            
+                                                                                                                                                            
+⏺ You've got most of it. A couple of corrections and then let me tackle the session-lock-scope question.                                                    
+                                                                                                                                                            
+  Quick correction on #3                                                                                                                                  
+                                                                                                                                                            
+  Re-trace it carefully. Challenger A read the row when it still said PID=100. A's pg_terminate_backend(100) targets PID 100 — the old leader. By the time A
+   acts, the old leader is already dead (B killed it). So A's call is a no-op (PID doesn't exist). Then A's pg_try_advisory_lock fails because B holds it.  
+  Nobody healthy gets killed. The reason: A's view of "who to kill" comes from the row, which only ever names the dead leader's PID, not B's. By the time   
+  the row contains B's PID, the timestamp is also fresh, so A wouldn't try to kill it.                                                                    
+
+  The only way A kills a healthy node is if A acts on a fresh PID with a stale timestamp — which is the scenario where you'd want to ask "could the row ever
+   be in that state?" Trace through #4 (lock-then-write) and you'll see it can't, briefly.
+                                                                                                                                                            
+  Session lock scope — the model                                                                                                                            
+   
+  A session-level advisory lock has two pieces of "scope":                                                                                                  
+                                                                                                                                                          
+  1. What it identifies — you pass a bigint key (or two ints). That number is the entire identity of the lock. Postgres doesn't know it represents "leader  
+  election" — that's just convention between clients. All three relay replicas have to agree on the same number (e.g., a hash of the string "relay_leader",
+  or just a constant like 0xRELAY01). Pick wrong/different numbers and the locks don't collide.                                                             
+  2. Who holds it — the session. Not the transaction, not the connection-pool slot, not the C# NpgsqlConnection object — the actual physical Postgres     
+  backend process. The lock lives in shared memory keyed by that backend's PID.                                                                             
+   
+  That's the entire scope. Lifecycle is:                                                                                                                    
+                                                                                                                                                          
+  - SELECT pg_try_advisory_lock(K) returns true → this session now holds K.                                                                                 
+  - The session goes away (clean close, killed via pg_terminate_backend, network drop eventually detected) → K is released automatically.
+  - SELECT pg_advisory_unlock(K) → explicitly released, session keeps going.                                                                                
+                                                                                                                                                          
+  Two important properties:                                                                                                                                 
+                                                                                                                                                          
+  - Re-entrant. Same session can grab the same K many times; you have to unlock it the same number of times (or let the session die). Postgres tracks the   
+  count.                                                                                                                                                  
+  - Pooling kills it. If you grab a session lock on a connection from a pool, when the pool returns the connection, DISCARD ALL runs and releases all       
+  session-level advisory locks. That's exactly why the LISTEN connection in Worker.cs:82 is the only safe place to hold one in this project — it's not      
+  pooled, it lives for the lifetime of ExecuteAsync.
+                                                                                                                                                            
+  What this means concretely for your design                                                                                                                
+   
+  The leader-election lock has to be acquired on the LISTEN connection. Same NpgsqlConnection object. Same physical session. The heartbeat UPDATE also runs 
+  on that same connection. Why?                                                                                                                           
+                                                                                                                                                            
+  - If the heartbeat is on the LISTEN connection, then "heartbeat succeeded" ↔ "session is alive" ↔ "I still hold the lock." One indivisible fact.          
+  - If the heartbeat runs through a pooled DbContext, you've decoupled them. The pooled connection might be fine while the LISTEN session has died — your
+  heartbeat keeps writing and you don't realize you've lost leadership.                                                                                     
+                                                                                                                                                          
+  So: same connection holds the LISTEN, holds the advisory lock, runs the heartbeat UPDATEs. Three jobs, one session.                                       
+                                                                                                                                                          
+  Sketch the SQL                                                                                                                                            
+                                                                                                                                                          
+  You still owe me three statements. Write them out:                                                                                                        
+   
+  - (a) The very first thing a node does on startup, to try to become leader.                                                                               
+  - (b) What the leader runs every N seconds.                                                                                                             
+  - (c) What a challenger runs when it decides the leader is dead and wants to take over (this is more than one statement).                                 
+                                                                                                                                                            
+  Sketch those and we'll find any remaining holes.                                                                                                          
+                                                                                                                                                            
+✻ Baked for 43s                                                                                                                                             
+                                                                                                                                                          
+❯ For number 3 if A is the leader gets stale, B kills the task becomes leader all of that and C polls the row goes to kill A but pauses, if A then comes    
+  back C could kill it again or would the PID be different on automatically?                                                                                
+                                                                                                                                                            
+⏺ Sharp question. Walk through it carefully:                                                                                                                
+                                                                                                                                                            
+  What happens to A's PID after the kill                                                                                                                    
+                                                                                                                                                            
+  pg_terminate_backend(100) terminates the Postgres backend process serving A's session. That OS process exits. From that moment on, "PID 100" doesn't refer
+   to A's Postgres session anymore — that session simply doesn't exist.                                                                                     
+                                                                                                                                                            
+  When A wakes up from its pause, what state is it in?                                                                                                    
+
+  - Its C# NpgsqlConnection object is still there.                                                                                                          
+  - The underlying socket is broken (server side hung up).
+  - The first DB call A attempts after waking up will throw — Npgsql gets EOF / RST on the socket.                                                          
+  - If A's code catches that and reconnects, the reconnect opens a brand new session with a new PID (say 300). A's old PID 100 is gone forever.             
+                                                                                                                                                            
+  So when C eventually calls pg_terminate_backend(100), it does not hit A's new session. A's new session is PID 300. C is targeting a number that no longer 
+  corresponds to A.                                                                                                                                         
+                                                                                                                                                            
+  But — here's the subtle problem                                                                                                                         
+
+  OS PIDs get reused. After PID 100's process exits, the kernel will eventually assign 100 to some completely different process. That process could be:     
+   
+  - Another Postgres backend for some unrelated client (Controllers, Worker_Node, even A's own reconnect on a different code path).                         
+  - A non-Postgres process (less concerning — pg_terminate_backend only operates on Postgres backends and just returns false if the PID isn't a backend). 
+                                                                                                                                                            
+  The case that actually bites: PID 100 is reused for an innocent Postgres backend belonging to some other service. C's stale-view kill takes out a healthy,
+   unrelated session.                                                                                                                                       
+                                                                                                                                                            
+  So the failure mode you should worry about isn't "C kills A again" — it's "C kills a stranger."                                                           
+   
+  Defense                                                                                                                                                   
+                                                                                                                                                          
+  What's the cheapest way to make C not act on stale information? You have two options:                                                                     
+   
+  1. Re-read right before acting. C polled the row 30 seconds ago and decided to take over. Before calling pg_terminate_backend, re-read the row inside the 
+  same transaction. If the timestamp is now fresh, abort — somebody else already became leader. If the PID changed, also abort.                           
+  2. Don't kill unless you have to. Try pg_try_advisory_lock(K) first. If it succeeds, the previous holder's session is already dead (likely from TCP       
+  keepalive eventually noticing). You didn't need to kill anyone — just take it. If it fails, then fall back to the kill path.                              
+   
+  Option 2 has a nice property: you only ever issue pg_terminate_backend when the lock is actually still held server-side, which dramatically narrows the   
+  window for harming a stranger.                                                                                                                          
+                                                                                                                                                            
+  Both can be combined: try_advisory_lock first; on failure, re-read the row, check both timestamp staleness and PID consistency, then kill.                
+   
+  Sanity check                                                                                                                                              
+                                                                                                                                                          
+  Trace through your original three-node scenario again with option 2:                                                                                      
+                                                                                                                                                          
+  - A leader, paused.                                                                                                                                       
+  - B detects stale, calls pg_try_advisory_lock → fails (A's session still alive server-side). B reads row, sees stale timestamp + PID 100. B kills 100,
+  tries lock again, gets it, becomes leader, updates row.                                                                                                   
+  - C, with its stale view of PID 100, finally acts. C calls pg_try_advisory_lock → fails (B holds it). C reads row → sees fresh timestamp, PID 200. Aborts.
+   No kill issued.                                                                                                                                          
+                                                                                                                                                          
+  PID-reuse risk avoided entirely because C never gets to the kill step.                                                                                    
+                                                                                                                                                          
+  So: the answer to your literal question is "A's new PID is different, so C wouldn't re-kill A specifically — but C could kill someone else who got A's old
+   PID, unless you guard against acting on stale state." Want to revise your sketch with these guards?
 --------                                                                                                                             
