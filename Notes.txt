@@ -260,3 +260,143 @@ How to inspect held advisory locks from another session (pg_locks system view)
 - Actually a lot of this isn't 100% necessary so getting started now
 - Working out what connections in my application are long lasting, seems like the connection used to call LISTEN is the only one that is tied to the lifetime of the relay worker
 - So need to acquire a session level advisory lock with this connection
+
+10/06/26
+------ Excerpt from Claude chat
+- Ok so I need a leadership election algorithm, I'm going to have 3 relay nodes running but only one activly polling the Tasks table, for availability and 
+  learning purposes. So the initial draft of the algorithm was to have a table row with a timestamp and a node id, which would represent a lease and who    
+  is currently holding the lease. The issue is, if the node holding the lease pauses for what ever reason, the lease expires, another picks it up and       
+  polls the task table then the original node comes back it has no way of knowing it lost the lease. So I would need to implement some sort of fencing      
+  token                        
+(Hint: re-read Kleppmann's "How to do distributed locking" piece if you haven't — the canonical fencing-token diagram has the number change only at lock
+  acquisition.)
+
+  2. Where does the check happen?
+
+  You described storing the token in a table row. But ask yourself: which table protects against the stale leader's writes? The lease row, or the resource
+  being written to?
+
+  If a paused leader comes back and tries to UPDATE "Tasks" SET ... WHERE "TaskId" = ..., what stops that statement from succeeding? Looking at the lease
+  row first doesn't help — between the lookup and the update, anything can happen. Where does the token actually need to be present to make the protective
+  check atomic?
+
+  3. What does "rejected" look like for a stale operation?
+
+  Pick a single concrete operation the relay does — say, UPDATE "Tasks" SET "SentAt" = clock_timestamp() WHERE "TaskId" = ... (the line you've already seen
+  in Worker.cs). Write out how that statement would change so that a stale leader's version of it becomes a no-op rather than an error. The shape of the
+  answer tells you what columns/rows you need.
+
+  4. Do you even need fencing here?
+
+  This is the deeper question: fencing tokens exist because the resource being protected lives in a different system from the lock manager (Kleppmann's
+  example: lock in Redis, writes to S3 — S3 can't ask Redis "is this client still the leader?"). In your setup, the lock and the resource both live in the
+  same Postgres. What primitive does that let you use that sidesteps the whole fencing problem?
+
+  Try sketching answers to those four — happy to push back on whatever you come up with.
+
+✻ Sautéed for 33s
+
+※ recap: You're designing a leader-election algorithm for 3 relay nodes using a lease + fencing token, so a paused leader can't write after losing the      
+  lease. Next: answer the four guiding questions I posed, especially where the fencing check happens and whether you need fencing at all given lock and 
+  resource share Postgres. (disable recaps in /config)                                                                                                      
+                                                                                                                                                          
+❯ Postgres Advisory locks seem to be the solution to this issue, but I'm dealing with the issue of a node dying without releasing the lock, the lock will   
+  then be released after a timeout. I feel like there's a more robust way to handle that then waiting for the timeout to expire before another node can     
+  grab the lock                                                                                                                                             
+                                                                                                                                                            
+⏺ Right — that's the real question. Don't ask "how do I avoid timeouts," ask "where is the latency coming from, and what could shortcut it?"                
+                                                                                                                                                          
+  A few prompts to chew on:
+                                                                                                                                                            
+  1. Who has information that Postgres doesn't?                                                                                                             
+                                                                                                                                                            
+  Postgres is waiting for its TCP layer (or client_connection_check_interval) to notice the dead peer. But the other two relay replicas might have evidence 
+  the holder is dead much sooner — e.g., they expected something from it and didn't get it. What evidence could a challenger replica gather without       
+  involving the network layer at all? What would the leader need to be doing for that evidence to exist?                                                    
+                                                                                                                                                          
+  2. Once a challenger is sure the holder is dead, can it do something about it instead of waiting?                                                         
+   
+  You've established that the lock is released when the session ends. The session ends when the backend process exits. Is there a way for one Postgres      
+  client to make another client's backend process exit? Look up what Postgres exposes for session management — there's a function for exactly this. If you
+  find it, the question becomes: what does the challenger need to know to call it?                                                                          
+                                                                                                                                                          
+  3. What's the failure mode if the challenger is wrong?
+
+  Say the challenger decides the leader is dead, kills its session, grabs the lock — but the leader was actually just slow and is mid-write. Walk through   
+  what happens to the leader's in-flight transaction once its session is killed server-side. Is the resulting state safe? (This is where the "lock +
+  resource in the same Postgres" property pays off — compare to what would happen if the resource were S3.)                                                 
+                                                                                                                                                          
+  4. The shape of the solution
+
+  If you put (1) and (2) together, you end up with a pattern that looks like:                                                                               
+   
+  - Leader publishes something periodically that proves liveness.                                                                                           
+  - Leader also publishes something that identifies its session.                                                                                          
+  - Challenger watches the first; if it goes stale, uses the second to evict.                                                                               
+                                                                                                                                                            
+  Both "somethings" are just rows in a table. See if you can sketch the schema and the two SQL statements (leader's heartbeat update + challenger's         
+  eviction-and-acquire) before reading further. The interesting part is making the challenger's action atomic so two challengers don't race each other into 
+  a double-takeover.                                                                                                                                        
+                                                                                                                                                          
+  What does your sketch look like?                                                                                                                          
+   
+✻ Cooked for 33s                                                                                                                                            
+                                                                                                                                                          
+❯ So the leader would emit a heartbeat to the challenger nodes, there would be a time limit on these heartbeats so if it's not received in time it's        
+  presumed dead (this raises the question of a network partition). The leader can emit it's PID (not exactly sure what this value is) and the challenger    
+  can call pg_terminate_backend(pid). calling this mid-write will trigger a rollback so it's atomic. Since there are two challengers what would happen if   
+  both call pg_terminate_backend(pid), what if one receives a heartbeat and the other doesn't due to a network partition, then it would be constantly       
+  killing connections. I'm guessing this is where a consensus would need to be reached by the majority of challengers, so instead of 2 we have 3            
+  challengers, 1 leader and when a leader re election is required it requires the consensus of the majorit of challengers                                   
+                                                                                                                                                            
+⏺ You're on the right track but you've taken a wrong turn at the end. Let me push back on a few things.                                                     
+                                                                                                                                                          
+  PID is just the backend process ID (SELECT pg_backend_pid()), the OS-level process Postgres spawned to handle that session. That's the right thing to     
+  publish.                                                                                                                                                  
+                                                                                                                                                            
+  Re: "two challengers both call pg_terminate_backend(pid)"                                                                                                 
+                                                                                                                                                            
+  Walk through it concretely:                                                                                                                               
+                                                                                                                                                          
+  1. Both challengers race to pg_terminate_backend(pid). First one wins, leader's session ends, lock released. Second call returns false (PID no longer     
+  exists) — harmless.
+  2. Both challengers race to pg_try_advisory_lock(...). Only one wins. That's the entire point of the advisory lock — Postgres serializes the acquisition. 
+                                                                                                                                                            
+  So… is the double-kill actually a problem? What property of the lock guarantees you don't get two leaders even if all three challengers simultaneously    
+  decide the leader is dead?                                                                                                                                
+                                                                                                                                                            
+  Re: "consensus among challengers"                                                                                                                       
+
+  You're about to reinvent Raft, and you don't need to. Ask yourself: why does Raft exist? It exists because the participants don't share a single source of
+   truth — they have to vote to agree on one. You're not in that situation. You have Postgres. Postgres is already a strongly-consistent single source of
+  truth, and pg_try_advisory_lock is already an atomic compare-and-swap with serialization.                                                                 
+                                                                                                                                                          
+  If you find yourself adding a voting protocol on top of a database that already serializes writes, you've over-engineered it. The rule of thumb: when     
+  there's a single coordinator that everyone can talk to, you don't need consensus among the clients — the coordinator IS the consensus.
+                                                                                                                                                            
+  Re: the network partition                                                                                                                               
+
+  This is the part that's worth a deeper look. You framed it as "one challenger sees the heartbeat, the other doesn't, due to a network partition." But ask 
+  yourself: where would the heartbeat live so that this scenario can't happen?
+                                                                                                                                                            
+  If the leader sends heartbeats directly to challengers (UDP, HTTP, whatever), then yes, partitions can produce inconsistent views. But what if the        
+  heartbeat is just a row the leader UPDATEs in Postgres, and challengers read it? Now there's no leader-to-challenger network path at all. Every node only
+  talks to Postgres. What failure modes does that eliminate? What's the one failure mode that remains, and is it actually a problem?                        
+                                                                                                                                                          
+  (Hint: if a challenger can't reach Postgres, what can it do? Can it cause any damage from its partitioned corner?)                                        
+   
+  Reframe                                                                                                                                                   
+                                                                                                                                                          
+  Try writing this down with these constraints:                                                                                                             
+  - All communication goes through Postgres rows / locks. No direct node-to-node messaging.
+  - No voting between challengers. The lock acquisition itself is the election.                                                                             
+  - The heartbeat is a last_seen_at column the leader updates, and an "I am the leader, my PID is X" column.                                              
+                                                                                                                                                            
+  What are the exact SQL statements:                                                                                                                        
+  - The leader runs every N seconds?                                                                                                                        
+  - A challenger runs when it decides to attempt takeover?                                                                                                  
+                                                                                                                                                          
+  Sketch those and you'll find the design collapses into something quite small.                                                                             
+                                                                                         
+
+--------                                                                                                                             
