@@ -96,11 +96,11 @@ namespace Relay
             }
 
             await OnProcessOutboxQueue();
+
             while (!stoppingToken.IsCancellationRequested)
             {
-                await _dbConnection
-                    .WaitAsync(stoppingToken)
-                    .ConfigureAwait(false);
+                await _dbConnection.WaitAsync(10, stoppingToken);
+                Console.WriteLine("RAN");
             }
 
             await _dbConnection.DisposeAsync();
@@ -112,7 +112,7 @@ namespace Relay
         /// <param name="obj">The object data.</param>
         /// <param name="args">The event arguments.</param>
         private async void OnNotify(object obj, NpgsqlNotificationEventArgs args)
-        {
+        {   
             await OnProcessOutboxQueue();
         }
 
