@@ -18,7 +18,7 @@ namespace Relay
     {
         #region Constants
 
-        private const int HeartbeatInterval = 3;
+        private const int HeartbeatIntervalSeconds = 3;
         private const long LockValue = 0x7E1A7L;
 
         #endregion
@@ -104,15 +104,9 @@ namespace Relay
             }
 
             await TryAquireLock(stoppingToken);
-            if (_lockAquired)
-            {
-                Console.WriteLine("I HAVE THE LOCK");
-            } else
-            {
-                Console.WriteLine("I DONT HAVE THE LOCK");
+            if (_lockAquired){
+                await OnProcessOutboxQueue();
             }
-
-            await OnProcessOutboxQueue();
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -121,12 +115,13 @@ namespace Relay
                     
                 } else
                 {
-                    await TryAquireLock(stoppingToken);
+                    await PollHeartbeat(stoppingToken);
                 }
 
                 await _dbConnection.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
             }
 
+            await 
             await _dbConnection.DisposeAsync();
         }
 
@@ -208,9 +203,17 @@ namespace Relay
 
         private async Task TryAquireLock(CancellationToken stoppingToken)
         {
-            await using var cmd = new NpgsqlCommand($"SELECT pg_try_advisory_lock(@key)", _dbConnection);
+            await using var cmd = new NpgsqlCommand("SELECT pg_try_advisory_lock(@key)", _dbConnection);
             cmd.Parameters.AddWithValue("key", LockValue);
             _lockAquired = (bool)(await cmd.ExecuteScalarAsync(stoppingToken))!;
+        }
+
+
+        private async Task ReleaseLock(CancellationToken stoppingToken)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", _dbConnection);
+            cmd.Parameters.AddWithValue("key", LockValue);
+            _lockAquired = false;
         }
 
         /// <summary>
