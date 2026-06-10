@@ -16,6 +16,13 @@ namespace Relay
 {
     public class Worker : BackgroundService
     {
+        #region Constants
+
+        private const int HeartbeatInterval = 3;
+        private const long LockValue = 0x7E1A7L;
+
+        #endregion
+
         #region Fields
 
         private NpgsqlConnection? _dbConnection;
@@ -52,6 +59,7 @@ namespace Relay
             _configuration = configuration;
             _dbContextFactory = dbContextFactory;
             _logger = logger;
+            _lockAquired = false;
 
             _processingOutbox = false;
             _processingStale = false;
@@ -95,12 +103,28 @@ namespace Relay
                 }
             }
 
+            await TryAquireLock(stoppingToken);
+            if (_lockAquired)
+            {
+                Console.WriteLine("I HAVE THE LOCK");
+            } else
+            {
+                Console.WriteLine("I DONT HAVE THE LOCK");
+            }
+
             await OnProcessOutboxQueue();
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                await _dbConnection.WaitAsync(10, stoppingToken);
-                Console.WriteLine("RAN");
+                if (_lockAquired)
+                {
+                    
+                } else
+                {
+                    await TryAquireLock(stoppingToken);
+                }
+
+                await _dbConnection.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
             }
 
             await _dbConnection.DisposeAsync();
@@ -166,15 +190,27 @@ namespace Relay
             }
         }
 
-        private async Task OnTryAquireLock()
+        private async Task PollHeartbeat(CancellationToken stoppingToken)
         {
-            if (_lockAquired)
+            await using (var cmd = new NpgsqlCommand("", _dbConnection))
             {
-                await Task.Yield();
-                return;
+                try
+                {
+                    await cmd.ExecuteNonQueryAsync(stoppingToken);
+                    _lockAquired = true;
+                } catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to aquire lock");
+                    _lockAquired = false;
+                }
             }
+        }
 
-
+        private async Task TryAquireLock(CancellationToken stoppingToken)
+        {
+            await using var cmd = new NpgsqlCommand($"SELECT pg_try_advisory_lock(@key)", _dbConnection);
+            cmd.Parameters.AddWithValue("key", LockValue);
+            _lockAquired = (bool)(await cmd.ExecuteScalarAsync(stoppingToken))!;
         }
 
         /// <summary>
