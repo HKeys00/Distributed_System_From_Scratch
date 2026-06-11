@@ -581,4 +581,10 @@ Ok so there would be a table called leader or something with a single row, which
                                                                                                                                                           
   So: the answer to your literal question is "A's new PID is different, so C wouldn't re-kill A specifically — but C could kill someone else who got A's old
    PID, unless you guard against acting on stale state." Want to revise your sketch with these guards?
---------                                                                                                                             
+-------
+
+11/06/26
+- Working on acquiring the lock, all relay instances can acquire the lock on startup
+- Need to figure out best way to manage the _lock state on the relay node, how does it know it still has the lock worth reading DDIA to see if that has the answer.
+- Currently I'm building it out so that you have to check if the lock is still available before making the heartbeat query, but also the lock applies to reading the outbox table and publishing tasks, I don't know what the scope of a token actually is
+- Fencing tokens don't make a lot of sense, I can probably just need to have a transansaction that does it all in one. But what does that mean. I'm confused as to what a token actually blocks, does it block any other connections to the DB?                                                                                                                             

@@ -100,7 +100,7 @@ namespace Data
             .HasDefaultValueSql("clock_timestamp()");
 
             modelBuilder.Entity<Leader>()
-            .HasNoKey();
+            .ToTable(t => t.HasCheckConstraint("CK_ID", "\"Id\" = 1"));
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");

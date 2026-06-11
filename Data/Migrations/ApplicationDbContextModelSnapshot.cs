@@ -24,13 +24,24 @@ namespace Data.Migrations
 
             modelBuilder.Entity("Data.Models.Leader", b =>
                 {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
                     b.Property<TimeSpan>("LastSeenAt")
                         .HasColumnType("interval");
 
                     b.Property<Guid>("PID")
                         .HasColumnType("uuid");
 
-                    b.ToTable("Leader");
+                    b.HasKey("Id");
+
+                    b.ToTable("Leader", t =>
+                        {
+                            t.HasCheckConstraint("CK_ID", "\"Id\" = 1");
+                        });
                 });
 
             modelBuilder.Entity("Data.Models.Status.Conflict", b =>

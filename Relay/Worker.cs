@@ -11,6 +11,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
 using Data.Models.Status;
+using Microsoft.VisualBasic;
 
 namespace Relay
 {
@@ -39,6 +40,8 @@ namespace Relay
 
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
+        private readonly Timer _heartbeatPollTimer;
+        private readonly Timer _heartbeatUpdateTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
@@ -66,13 +69,23 @@ namespace Relay
 
             _outBoxTimer = new Timer(5000);
             _outBoxTimer.AutoReset = true;
-            _outBoxTimer.Enabled = true;
+            _outBoxTimer.Enabled = false;
             _outBoxTimer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
 
             _staleTimer = new Timer(10000);
             _staleTimer.AutoReset = true;
-            _staleTimer.Enabled = true;
+            _staleTimer.Enabled = false;
             _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
+
+            _heartbeatPollTimer = new Timer(4000);
+            _heartbeatPollTimer.AutoReset = true;
+            _heartbeatPollTimer.Enabled = false;
+            _heartbeatPollTimer.Elapsed += async (_, _) => await PollHeartbeat();
+
+            _heartbeatUpdateTimer = new Timer(3000);
+            _heartbeatUpdateTimer.AutoReset = true;
+            _heartbeatUpdateTimer.Enabled = false;
+            _heartbeatUpdateTimer.Elapsed += async (_, _) => await WriteHeartbeat();
 
             _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
             _pendingTasks = new HashSet<Guid>();
@@ -91,6 +104,99 @@ namespace Relay
             
             _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
             await _dbConnection.OpenAsync(stoppingToken);
+
+            try
+            {
+                const string seedSql = "INSERT INTO \"Leader\" (\"Id\", \"PID\", \"LastSeenAt\") VALUES (1, 0, clock_timestamp()) ON CONFLICT (\"Id\") DO NOTHING";
+                await using var cmd = new NpgsqlCommand(seedSql, _dbConnection);
+                await cmd.ExecuteNonQueryAsync(stoppingToken);
+            } catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                //Swallow any exceptions thrown.
+            }
+
+            Console.WriteLine("AHHHHHH");
+            await TryAquireLock(stoppingToken);
+            if (_lockAquired)
+            {
+                await OnAssignedLeader(stoppingToken);
+            } else
+            {
+                await OnAssignedFollower(stoppingToken);
+            }
+        }
+
+
+        /// <summary>
+        /// Challenger-side periodic check. Reads the leader heartbeat row and, if it is stale,
+        /// terminates the dead leader's backend session and attempts to acquire the advisory lock
+        /// to take over leadership. Runs on the same physical session used for LISTEN and the lock,
+        /// so any success here is bound to this connection's lifetime.
+        /// </summary>
+        /// <returns>A task that completes once the heartbeat check (and any takeover attempt) finishes.</returns>
+        private async Task PollHeartbeat()
+        {
+            await using (var cmd = new NpgsqlCommand("", _dbConnection))
+            {
+                try
+                {
+                    await cmd.ExecuteNonQueryAsync();
+                    _lockAquired = true;
+                } catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to aquire lock");
+                    _lockAquired = false;
+                }
+            }
+        }
+
+        private async Task WriteHeartbeat()
+        {
+            await using (var cmd = new NpgsqlCommand("", _dbConnection))
+            {
+                
+            }
+        }
+
+        /// <summary>
+        /// Attempts to acquire the session-level Postgres advisory lock identified by
+        /// <see cref="LockValue"/>. Non-blocking: returns immediately with the lock either
+        /// acquired or not. The lock is bound to the lifetime of <see cref="_dbConnection"/>
+        /// and is released automatically if that session ends for any reason (clean dispose,
+        /// pg_terminate_backend, dropped TCP connection). Sets <see cref="_lockAquired"/> to
+        /// the boolean result so the main loop can branch into leader or challenger behaviour.
+        /// </summary>
+        /// <param name="stoppingToken">Cancellation token tied to the host lifetime.</param>
+        /// <returns>A task that completes once the acquisition attempt has returned.</returns>
+        private async Task TryAquireLock(CancellationToken stoppingToken)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT pg_try_advisory_lock(@key)", _dbConnection);
+            cmd.Parameters.AddWithValue("key", LockValue);
+            _lockAquired = (bool)(await cmd.ExecuteScalarAsync(stoppingToken))!;
+        }
+
+
+        /// <summary>
+        /// Explicitly releases the advisory lock identified by <see cref="LockValue"/> on
+        /// <see cref="_dbConnection"/>. Used for graceful step-down so another replica can
+        /// take over without waiting for TCP keepalives or pg_terminate_backend. Note that
+        /// session death (clean shutdown, killed backend, dropped connection) already
+        /// releases the lock automatically, so this is only needed when the process intends
+        /// to keep its session alive but stop being the leader.
+        /// </summary>
+        /// <param name="stoppingToken">Cancellation token tied to the host lifetime.</param>
+        /// <returns>A task that completes once the unlock statement has returned.</returns>
+        private async Task ReleaseLock(CancellationToken stoppingToken)
+        {
+            await using var cmd = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", _dbConnection);
+            cmd.Parameters.AddWithValue("key", LockValue);
+            _lockAquired = false;
+        }
+
+        
+        private async Task OnAssignedLeader(CancellationToken stoppingToken)
+        {
             _dbConnection.Notification += OnNotify;
             await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
             {
@@ -103,26 +209,26 @@ namespace Relay
                 }
             }
 
-            await TryAquireLock(stoppingToken);
-            if (_lockAquired){
-                await OnProcessOutboxQueue();
-            }
+            await OnProcessOutboxQueue();
+            _staleTimer.Enabled = true;
+            _outBoxTimer.Enabled = true;
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (_lockAquired)
+                try
+                {
+                    await WriteHeartbeat();
+                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
+                } catch
                 {
                     
-                } else
-                {
-                    await PollHeartbeat(stoppingToken);
                 }
-
-                await _dbConnection.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
             }
+        }
 
-            await 
-            await _dbConnection.DisposeAsync();
+        private async Task OnAssignedFollower(CancellationToken stoppingToken)
+        {
+            //_heartbeatPollTimer.Enabled = true;
         }
 
         /// <summary>
@@ -183,37 +289,6 @@ namespace Relay
             {
                 _pendingTasks.Remove(task.TaskId);
             }
-        }
-
-        private async Task PollHeartbeat(CancellationToken stoppingToken)
-        {
-            await using (var cmd = new NpgsqlCommand("", _dbConnection))
-            {
-                try
-                {
-                    await cmd.ExecuteNonQueryAsync(stoppingToken);
-                    _lockAquired = true;
-                } catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to aquire lock");
-                    _lockAquired = false;
-                }
-            }
-        }
-
-        private async Task TryAquireLock(CancellationToken stoppingToken)
-        {
-            await using var cmd = new NpgsqlCommand("SELECT pg_try_advisory_lock(@key)", _dbConnection);
-            cmd.Parameters.AddWithValue("key", LockValue);
-            _lockAquired = (bool)(await cmd.ExecuteScalarAsync(stoppingToken))!;
-        }
-
-
-        private async Task ReleaseLock(CancellationToken stoppingToken)
-        {
-            await using var cmd = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", _dbConnection);
-            cmd.Parameters.AddWithValue("key", LockValue);
-            _lockAquired = false;
         }
 
         /// <summary>

@@ -1,5 +1,5 @@
-﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -15,11 +15,15 @@ namespace Data.Migrations
                 name: "Leader",
                 columns: table => new
                 {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     LastSeenAt = table.Column<TimeSpan>(type: "interval", nullable: false),
                     PID = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
+                    table.PrimaryKey("PK_Leader", x => x.Id);
+                    table.CheckConstraint("CK_ID", "\"Id\" = 1");
                 });
         }
 
