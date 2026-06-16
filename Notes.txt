@@ -592,3 +592,4 @@ Ok so there would be a table called leader or something with a single row, which
 
 17/06/26
 - Ok so a lock doesn't actually block anything, it is purely handled on my side and doesn't mean anything substantial to Postgres.... I think.
+- So the _dbConnection itself acts as the check to see if the leader is still valid, I need to update all connections to use the _dbConnection object, because if that exists then the connection is still valid and hasn't been killed. That means I probably need to keep the _lockAquired property, since the idea of a relay halting being killed and still thinking it has the lock doesn't exist because the underlying _dbCOnnection object won't work.
