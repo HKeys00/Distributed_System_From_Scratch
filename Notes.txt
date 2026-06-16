@@ -588,3 +588,7 @@ Ok so there would be a table called leader or something with a single row, which
 - Need to figure out best way to manage the _lock state on the relay node, how does it know it still has the lock worth reading DDIA to see if that has the answer.
 - Currently I'm building it out so that you have to check if the lock is still available before making the heartbeat query, but also the lock applies to reading the outbox table and publishing tasks, I don't know what the scope of a token actually is
 - Fencing tokens don't make a lot of sense, I can probably just need to have a transansaction that does it all in one. But what does that mean. I'm confused as to what a token actually blocks, does it block any other connections to the DB?                                                                                                                             
+
+
+17/06/26
+- Ok so a lock doesn't actually block anything, it is purely handled on my side and doesn't mean anything substantial to Postgres.... I think.

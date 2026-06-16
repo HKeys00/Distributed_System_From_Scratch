@@ -30,11 +30,11 @@ namespace Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<TimeSpan>("LastSeenAt")
-                        .HasColumnType("interval");
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamptz");
 
-                    b.Property<Guid>("PID")
-                        .HasColumnType("uuid");
+                    b.Property<int>("PID")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
