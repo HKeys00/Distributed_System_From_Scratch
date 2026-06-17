@@ -17,7 +17,7 @@ namespace Data.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    LastSeenAt = table.Column<DateTime>(type: "timestamptz", nullable: false),
+                    LastSeenAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     PID = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>

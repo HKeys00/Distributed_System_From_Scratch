@@ -11,7 +11,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
 using Data.Models.Status;
-using Microsoft.VisualBasic;
 
 namespace Relay
 {
@@ -19,8 +18,11 @@ namespace Relay
     {
         #region Constants
 
-        private const int HeartbeatIntervalSeconds = 3;
-        private const int HeartbeatStaleSeconds = 10;
+        // private const int HeartbeatIntervalSeconds = 3;
+        // private const int HeartbeatStaleSeconds = 5;
+
+        private const int HeartbeatIntervalSeconds = 10;
+        private const int HeartbeatStaleSeconds = 15;
         private const long LockValue = 0x7E1A7L;
 
         #endregion
@@ -42,7 +44,7 @@ namespace Relay
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
         private readonly Timer _heartbeatPollTimer;
-        private readonly Timer _heartbeatUpdateTimer;
+        //private readonly Timer _heartbeatUpdateTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
@@ -62,7 +64,6 @@ namespace Relay
             _configuration = configuration;
             _dbContextFactory = dbContextFactory;
             _logger = logger;
-            _lockAquired = false;
 
             _processingOutbox = false;
             _processingStale = false;
@@ -70,22 +71,22 @@ namespace Relay
             _outBoxTimer = new Timer(5000);
             _outBoxTimer.AutoReset = true;
             _outBoxTimer.Enabled = false;
-            _outBoxTimer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
+            _outBoxTimer.Elapsed += async (_, _) => await TryProcessOutboxQueue();
 
             _staleTimer = new Timer(10000);
             _staleTimer.AutoReset = true;
             _staleTimer.Enabled = false;
-            _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
+            _staleTimer.Elapsed += async (_, _) => await TryProcessStaleTasks();
 
-            _heartbeatPollTimer = new Timer(4000);
+            _heartbeatPollTimer = new Timer(HeartbeatStaleSeconds);
             _heartbeatPollTimer.AutoReset = true;
             _heartbeatPollTimer.Enabled = false;
             _heartbeatPollTimer.Elapsed += async (_, _) => await PollHeartbeat();
 
-            _heartbeatUpdateTimer = new Timer(3000);
-            _heartbeatUpdateTimer.AutoReset = true;
-            _heartbeatUpdateTimer.Enabled = false;
-            _heartbeatUpdateTimer.Elapsed += async (_, _) => await WriteHeartbeat();
+            // _heartbeatUpdateTimer = new Timer(3000);
+            // _heartbeatUpdateTimer.AutoReset = true;
+            // _heartbeatUpdateTimer.Enabled = false;
+            // _heartbeatUpdateTimer.Elapsed += async (_, _) => await WriteHeartbeat();
 
             _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
             _pendingTasks = new HashSet<Guid>();
@@ -119,10 +120,12 @@ namespace Relay
             var lockAquired = await TryAquireLock();
             if (lockAquired)
             {
-                await OnAssignedLeader(stoppingToken);
+                _logger.LogInformation("Acquired advisory lock on startup, assuming leader role");
+                await OnAssignedLeader();
             } else
             {
-                await OnAssignedFollower(stoppingToken);
+                _logger.LogInformation("Advisory lock already held, starting as follower");
+                _heartbeatPollTimer.Enabled = true;
             }
         }
 
@@ -138,9 +141,13 @@ namespace Relay
         {
             try
             {
+                _logger.LogDebug("Polling leader heartbeat");
+
                 var lockAquired = await TryAquireLock();
                 if (lockAquired)
                 {
+                    _logger.LogInformation("Acquired advisory lock without eviction, promoting to leader");
+                    await OnAssignedLeader();
                     return;
                 }
 
@@ -153,13 +160,24 @@ namespace Relay
                     )
                     SELECT pg_terminate_backend(""PID"") FROM stale";
 
+                int evicted;
                 await using (var evict = new NpgsqlCommand(evictSql, _dbConnection))
                 {
                     evict.Parameters.AddWithValue("threshold", (double)HeartbeatStaleSeconds);
-                    await evict.ExecuteNonQueryAsync();
+                    evicted = await evict.ExecuteNonQueryAsync();
                 }
 
-                await TryAquireLock();
+                if (evicted > 0)
+                {
+                    _logger.LogWarning("Detected stale leader, terminated {Count} backend(s)", evicted);
+                }
+
+                lockAquired = await TryAquireLock();
+                if (lockAquired)
+                {
+                    _logger.LogInformation("Acquired advisory lock after evicting stale leader, promoting to leader");
+                    await OnAssignedLeader();
+                }
             }
             catch (Exception ex)
             {
@@ -167,11 +185,18 @@ namespace Relay
             }
         }
 
+        /// <summary>
+        /// Leader-side heartbeat write. Stamps the singleton Leader row with the current
+        /// clock and this session's backend PID so followers can detect liveness and know
+        /// which backend to terminate if the leader goes stale.
+        /// </summary>
+        /// <returns>A task that completes once the update has returned.</returns>
         private async Task WriteHeartbeat()
         {
             const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp(), \"PID\" = pg_backend_pid() WHERE \"Id\" = 1";
             await using var cmd = new NpgsqlCommand(sql, _dbConnection);
             await cmd.ExecuteNonQueryAsync();
+            _logger.LogDebug("Wrote leader heartbeat");
         }
 
         /// <summary>
@@ -199,24 +224,38 @@ namespace Relay
         /// releases the lock automatically, so this is only needed when the process intends
         /// to keep its session alive but stop being the leader.
         /// </summary>
-        /// <param name="stoppingToken">Cancellation token tied to the host lifetime.</param>
         /// <returns>A task that completes once the unlock statement has returned.</returns>
-        private async Task ReleaseLock(CancellationToken stoppingToken)
+        private async Task TryReleaseLock()
         {
             await using var cmd = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", _dbConnection);
             cmd.Parameters.AddWithValue("key", LockValue);
-            _lockAquired = false;
+
+            await OnDemotedToFollower();
         }
 
-        
-        private async Task OnAssignedLeader(CancellationToken stoppingToken)
+        /// <summary>
+        /// Leader entry-point. Subscribes to the task_channel LISTEN, kicks off an initial
+        /// outbox drain, enables the leader-only timers (outbox, stale reaper), then enters
+        /// a loop that writes the heartbeat and waits on notifications. Any failure on the
+        /// session is treated as loss of leadership: the lock is released and the loop exits.
+        /// </summary>
+        /// <returns>A task that completes when leadership is relinquished or the host stops.</returns>
+        private async Task OnAssignedLeader()
         {
+            _heartbeatPollTimer.Enabled = false;
+
+            if (_dbConnection == null)
+            {
+                return;
+            }
+
+            _logger.LogInformation("Entering leader role");
             _dbConnection.Notification += OnNotify;
             await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
             {
                 try
                 {
-                    await cmd.ExecuteNonQueryAsync(stoppingToken);
+                    await cmd.ExecuteNonQueryAsync();
                 } catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to create listener for task_channel");
@@ -227,22 +266,42 @@ namespace Relay
             _staleTimer.Enabled = true;
             _outBoxTimer.Enabled = true;
 
-            while (!stoppingToken.IsCancellationRequested)
+            while (true)
             {
                 try
                 {
                     await WriteHeartbeat();
-                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
+                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
                 } catch
                 {
-                    
+                    await TryReleaseLock();
+                    break;
                 }
             }
         }
 
-        private async Task OnAssignedFollower(CancellationToken stoppingToken)
+        /// <summary>
+        /// Transition hook invoked when the leader detects it has lost its session (e.g. the
+        /// backend was terminated by a challenger via <c>pg_terminate_backend</c>). Disables
+        /// leader-only timers, disposes the broken connection, opens a fresh one, and rejoins
+        /// the cluster as a follower.
+        /// </summary>
+        /// <returns>A task that completes once the worker has re-entered the follower state.</returns>
+        private async Task OnDemotedToFollower()
         {
+            _logger.LogWarning("Demoting to follower, leader session lost");
+            _outBoxTimer.Enabled = false;
+            _staleTimer.Enabled = false;
+
+            if (_dbConnection != null)
+            {
+                await _dbConnection.DisposeAsync();
+            }
+
+            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
+            await _dbConnection.OpenAsync();
             _heartbeatPollTimer.Enabled = true;
+            _logger.LogInformation("Entered follower role");
         }
 
         /// <summary>
@@ -302,6 +361,43 @@ namespace Relay
             } finally
             {
                 _pendingTasks.Remove(task.TaskId);
+            }
+        }
+
+        /// <summary>
+        /// Timer-driven wrapper around <see cref="OnProcessOutboxQueue"/>. Catches any failure
+        /// and, if the leader's DB session is no longer open, treats it as lost leadership and
+        /// demotes this replica to a follower.
+        /// </summary>
+        /// <returns>A task that completes once the outbox attempt (and any demotion) has finished.</returns>
+        private async Task TryProcessOutboxQueue()
+        {
+            try
+            {
+                await OnProcessOutboxQueue();
+            } catch
+            {
+                if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                {
+                    await OnDemotedToFollower();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Timer-driven wrapper around the stale-task sweep. Catches any failure and demotes
+        /// this replica to a follower, on the assumption that a failure here means the leader
+        /// session is no longer healthy.
+        /// </summary>
+        /// <returns>A task that completes once the stale sweep (and any demotion) has finished.</returns>
+        private async Task TryProcessStaleTasks()
+        {
+            try
+            {
+                await OnProcessOutboxQueue();
+            } catch
+            {
+                await OnDemotedToFollower();
             }
         }
 

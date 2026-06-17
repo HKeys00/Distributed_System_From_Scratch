@@ -593,3 +593,6 @@ Ok so there would be a table called leader or something with a single row, which
 17/06/26
 - Ok so a lock doesn't actually block anything, it is purely handled on my side and doesn't mean anything substantial to Postgres.... I think.
 - So the _dbConnection itself acts as the check to see if the leader is still valid, I need to update all connections to use the _dbConnection object, because if that exists then the connection is still valid and hasn't been killed. That means I probably need to keep the _lockAquired property, since the idea of a relay halting being killed and still thinking it has the lock doesn't exist because the underlying _dbCOnnection object won't work.
+
+18/06/26
+- Need to build an almost state machine with the way this is going, feels weakly taped together at the moment. I think there's a few race conditions with timers being disabled while a db connection is being reset. Need to figure out a way so that when worker is in the process of being demoted it, the timers can't try again then the worker tries to demote itself again. 
