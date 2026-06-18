@@ -596,3 +596,9 @@ Ok so there would be a table called leader or something with a single row, which
 
 18/06/26
 - Need to build an almost state machine with the way this is going, feels weakly taped together at the moment. I think there's a few race conditions with timers being disabled while a db connection is being reset. Need to figure out a way so that when worker is in the process of being demoted it, the timers can't try again then the worker tries to demote itself again. 
+
+19/06/26
+- Timers will constantly get out of sync with things dying and respawning, so need to make sure there's never enough of a gap between a relay polling and a relay writing to cause an unexpected axe
+- Leadership election working, need to incorporate the actual sending of data back in again, maybe start spawning in multiple workers.
+- Might need to toss away the notification listen event, which isn't the biggest deal
+- Because of how NPSql handles events, WaitAsync is required to receive events (like calling recv on the wire) but when I call WaitAsync I'm blocking everything else the connection could be doing.

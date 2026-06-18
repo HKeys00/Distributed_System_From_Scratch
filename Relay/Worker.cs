@@ -48,6 +48,7 @@ namespace Relay
 
         private bool _processingOutbox;
         private bool _processingStale;
+        private bool _isLeader;
 
         #endregion
 
@@ -67,6 +68,7 @@ namespace Relay
 
             _processingOutbox = false;
             _processingStale = false;
+            _isLeader = false;
 
             _outBoxTimer = new Timer(5000);
             _outBoxTimer.AutoReset = true;
@@ -78,7 +80,7 @@ namespace Relay
             _staleTimer.Enabled = false;
             _staleTimer.Elapsed += async (_, _) => await TryProcessStaleTasks();
 
-            _heartbeatPollTimer = new Timer(HeartbeatStaleSeconds);
+            _heartbeatPollTimer = new Timer(HeartbeatStaleSeconds * 1000);
             _heartbeatPollTimer.AutoReset = true;
             _heartbeatPollTimer.Enabled = false;
             _heartbeatPollTimer.Elapsed += async (_, _) => await PollHeartbeat();
@@ -141,7 +143,7 @@ namespace Relay
         {
             try
             {
-                _logger.LogDebug("Polling leader heartbeat");
+                _logger.LogInformation("Polling leader heartbeat");
 
                 var lockAquired = await TryAquireLock();
                 if (lockAquired)
@@ -195,8 +197,18 @@ namespace Relay
         {
             const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp(), \"PID\" = pg_backend_pid() WHERE \"Id\" = 1";
             await using var cmd = new NpgsqlCommand(sql, _dbConnection);
-            await cmd.ExecuteNonQueryAsync();
-            _logger.LogDebug("Wrote leader heartbeat");
+
+            try 
+            {
+                await cmd.ExecuteNonQueryAsync();
+                _logger.LogInformation("Wrote leader heartbeat");
+            }catch
+            {
+                if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                {
+                    await OnDemotedToFollower();
+                }
+            }
         }
 
         /// <summary>
@@ -265,8 +277,9 @@ namespace Relay
             await OnProcessOutboxQueue();
             _staleTimer.Enabled = true;
             _outBoxTimer.Enabled = true;
+            _isLeader = true;
 
-            while (true)
+            while (_isLeader)
             {
                 try
                 {
@@ -290,8 +303,10 @@ namespace Relay
         private async Task OnDemotedToFollower()
         {
             _logger.LogWarning("Demoting to follower, leader session lost");
+            
             _outBoxTimer.Enabled = false;
             _staleTimer.Enabled = false;
+            _isLeader = false;
 
             if (_dbConnection != null)
             {
@@ -407,8 +422,6 @@ namespace Relay
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
-            return;
-
             if (_processingOutbox)
             {
                 return;
@@ -426,7 +439,7 @@ namespace Relay
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Could not read outbox metrics");
+                _logger.LogWarning(ex, "Could not read outbox metrics");
             }
 
             int page = 1;
@@ -498,7 +511,7 @@ namespace Relay
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Could not read stale-task metrics");
+                _logger.LogWarning(ex, "Could not read stale-task metrics");
             }
 
             int page = 1;
@@ -597,7 +610,7 @@ namespace Relay
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
                         body: JsonSerializer.SerializeToUtf8Bytes(message));
                     AppMetrics.Relay.OutboxPublishes.WithLabels("success").Inc();
-                    _logger.LogDebug("CorrelationId={CorrelationId} TaskId={TaskId} Published task to broker",
+                    _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Published task to broker",
                         workItem.CorrelationId, workItem.TaskId);
                 }
                 catch (Exception ex)
