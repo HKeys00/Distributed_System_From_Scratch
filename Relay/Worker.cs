@@ -44,7 +44,6 @@ namespace Relay
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
         private readonly Timer _heartbeatPollTimer;
-        //private readonly Timer _heartbeatUpdateTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
@@ -84,11 +83,6 @@ namespace Relay
             _heartbeatPollTimer.AutoReset = true;
             _heartbeatPollTimer.Enabled = false;
             _heartbeatPollTimer.Elapsed += async (_, _) => await PollHeartbeat();
-
-            // _heartbeatUpdateTimer = new Timer(3000);
-            // _heartbeatUpdateTimer.AutoReset = true;
-            // _heartbeatUpdateTimer.Enabled = false;
-            // _heartbeatUpdateTimer.Elapsed += async (_, _) => await WriteHeartbeat();
 
             _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
             _pendingTasks = new HashSet<Guid>();
@@ -246,10 +240,10 @@ namespace Relay
         }
 
         /// <summary>
-        /// Leader entry-point. Subscribes to the task_channel LISTEN, kicks off an initial
-        /// outbox drain, enables the leader-only timers (outbox, stale reaper), then enters
-        /// a loop that writes the heartbeat and waits on notifications. Any failure on the
-        /// session is treated as loss of leadership: the lock is released and the loop exits.
+        /// Leader entry-point. Kicks off an initial outbox drain, enables the leader-only
+        /// timers (outbox, stale reaper), then enters a loop that writes the heartbeat on a
+        /// fixed cadence. Any failure on the session is treated as loss of leadership: the
+        /// lock is released and the loop exits.
         /// </summary>
         /// <returns>A task that completes when leadership is relinquished or the host stops.</returns>
         private async Task OnAssignedLeader()
@@ -262,17 +256,6 @@ namespace Relay
             }
 
             _logger.LogInformation("Entering leader role");
-            _dbConnection.Notification += OnNotify;
-            await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
-            {
-                try
-                {
-                    await cmd.ExecuteNonQueryAsync();
-                } catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to create listener for task_channel");
-                }
-            }
 
             await OnProcessOutboxQueue();
             _staleTimer.Enabled = true;
@@ -284,7 +267,7 @@ namespace Relay
                 try
                 {
                     await WriteHeartbeat();
-                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
+                    await Task.Delay(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
                 } catch
                 {
                     await TryReleaseLock();
@@ -317,16 +300,6 @@ namespace Relay
             await _dbConnection.OpenAsync();
             _heartbeatPollTimer.Enabled = true;
             _logger.LogInformation("Entered follower role");
-        }
-
-        /// <summary>
-        /// Handles a notification from the Postgres DB
-        /// </summary>
-        /// <param name="obj">The object data.</param>
-        /// <param name="args">The event arguments.</param>
-        private async void OnNotify(object obj, NpgsqlNotificationEventArgs args)
-        {   
-            await OnProcessOutboxQueue();
         }
 
         /// <summary>
