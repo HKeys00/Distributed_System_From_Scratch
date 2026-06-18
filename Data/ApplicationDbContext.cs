@@ -1,4 +1,5 @@
-﻿using Data.Models.Status;
+﻿using Data.Models;
+using Data.Models.Status;
 using Data.Models.Task;
 using Microsoft.EntityFrameworkCore;
 
@@ -38,6 +39,10 @@ namespace Data
         /// </summary>
         public DbSet<Dead> DLQ {get; set;}
 
+        /// <summary>
+        /// Represents the leader heartbeat table.
+        /// </summary>
+        public DbSet<Leader> Leader {get; set;}
         #endregion
 
         #region Constructor
@@ -93,6 +98,9 @@ namespace Data
             modelBuilder.Entity<Dead>()
             .Property(d => d.DeadAt)
             .HasDefaultValueSql("clock_timestamp()");
+
+            modelBuilder.Entity<Leader>()
+            .ToTable(t => t.HasCheckConstraint("CK_ID", "\"Id\" = 1"));
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");

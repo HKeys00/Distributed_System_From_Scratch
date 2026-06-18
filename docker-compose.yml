@@ -33,6 +33,12 @@ services:
         condition: service_healthy
       seq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9104/metrics || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   rabbitmq:
     image: rabbitmq:management
@@ -100,20 +106,23 @@ services:
     build:
       context: .
       dockerfile: Relay/Dockerfile
-    container_name: relay
     working_dir: /app
-    ports:
-      - "9102:9102"
+    expose:
+      - "9102"
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
       Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy
+      data:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       seq:
         condition: service_healthy
+    deploy:
+      replicas: 3
 
   worker-node:
     build:
