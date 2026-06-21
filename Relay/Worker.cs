@@ -10,7 +10,6 @@ using RabbitMQ.Client.Events;
 using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
-using Data.Models.Status;
 
 namespace Relay
 {
@@ -21,8 +20,8 @@ namespace Relay
         // private const int HeartbeatIntervalSeconds = 3;
         // private const int HeartbeatStaleSeconds = 5;
 
-        private const int HeartbeatIntervalSeconds = 10;
-        private const int HeartbeatStaleSeconds = 15;
+        private const int HeartbeatIntervalSeconds = 7;
+        private const int HeartbeatStaleSeconds = 21;
         private const long LockValue = 0x7E1A7L;
 
         #endregion
@@ -30,6 +29,7 @@ namespace Relay
         #region Fields
 
         private NpgsqlConnection? _dbConnection;
+        private readonly SemaphoreSlim _dbConnectionLock = new(1, 1);
         private IConnection? _rabbitConnection;
         private IChannel? _rabbitChannel;
 
@@ -44,6 +44,7 @@ namespace Relay
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
         private readonly Timer _heartbeatPollTimer;
+        //private readonly Timer _heartbeatUpdateTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
@@ -83,6 +84,11 @@ namespace Relay
             _heartbeatPollTimer.AutoReset = true;
             _heartbeatPollTimer.Enabled = false;
             _heartbeatPollTimer.Elapsed += async (_, _) => await PollHeartbeat();
+
+            // _heartbeatUpdateTimer = new Timer(3000);
+            // _heartbeatUpdateTimer.AutoReset = true;
+            // _heartbeatUpdateTimer.Enabled = false;
+            // _heartbeatUpdateTimer.Elapsed += async (_, _) => await WriteHeartbeat();
 
             _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
             _pendingTasks = new HashSet<Guid>();
@@ -189,19 +195,28 @@ namespace Relay
         /// <returns>A task that completes once the update has returned.</returns>
         private async Task WriteHeartbeat()
         {
-            const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp(), \"PID\" = pg_backend_pid() WHERE \"Id\" = 1";
-            await using var cmd = new NpgsqlCommand(sql, _dbConnection);
+            await _dbConnectionLock.WaitAsync();
+            try
+            {
+                const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp(), \"PID\" = pg_backend_pid() WHERE \"Id\" = 1";
+                await using var cmd = new NpgsqlCommand(sql, _dbConnection);
 
-            try 
-            {
-                await cmd.ExecuteNonQueryAsync();
-                _logger.LogInformation("Wrote leader heartbeat");
-            }catch
-            {
-                if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                try
                 {
-                    await OnDemotedToFollower();
+                    await cmd.ExecuteNonQueryAsync();
+                    _logger.LogInformation("Wrote leader heartbeat");
                 }
+                catch
+                {
+                    if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                    {
+                        await OnDemotedToFollower();
+                    }
+                }
+            }
+            finally
+            {
+                _dbConnectionLock.Release();
             }
         }
 
@@ -240,10 +255,10 @@ namespace Relay
         }
 
         /// <summary>
-        /// Leader entry-point. Kicks off an initial outbox drain, enables the leader-only
-        /// timers (outbox, stale reaper), then enters a loop that writes the heartbeat on a
-        /// fixed cadence. Any failure on the session is treated as loss of leadership: the
-        /// lock is released and the loop exits.
+        /// Leader entry-point. Subscribes to the task_channel LISTEN, kicks off an initial
+        /// outbox drain, enables the leader-only timers (outbox, stale reaper), then enters
+        /// a loop that writes the heartbeat and waits on notifications. Any failure on the
+        /// session is treated as loss of leadership: the lock is released and the loop exits.
         /// </summary>
         /// <returns>A task that completes when leadership is relinquished or the host stops.</returns>
         private async Task OnAssignedLeader()
@@ -256,6 +271,17 @@ namespace Relay
             }
 
             _logger.LogInformation("Entering leader role");
+            // _dbConnection.Notification += OnNotify;
+            // await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
+            // {
+            //     try
+            //     {
+            //         await cmd.ExecuteNonQueryAsync();
+            //     } catch (Exception ex)
+            //     {
+            //         _logger.LogError(ex, "Failed to create listener for task_channel");
+            //     }
+            // }
 
             await OnProcessOutboxQueue();
             _staleTimer.Enabled = true;
@@ -268,6 +294,7 @@ namespace Relay
                 {
                     await WriteHeartbeat();
                     await Task.Delay(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
+                    //await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
                 } catch
                 {
                     await TryReleaseLock();
@@ -300,6 +327,16 @@ namespace Relay
             await _dbConnection.OpenAsync();
             _heartbeatPollTimer.Enabled = true;
             _logger.LogInformation("Entered follower role");
+        }
+
+        /// <summary>
+        /// Handles a notification from the Postgres DB
+        /// </summary>
+        /// <param name="obj">The object data.</param>
+        /// <param name="args">The event arguments.</param>
+        private async void OnNotify(object obj, NpgsqlNotificationEventArgs args)
+        {   
+            await OnProcessOutboxQueue();
         }
 
         /// <summary>
@@ -382,10 +419,13 @@ namespace Relay
         {
             try
             {
-                await OnProcessOutboxQueue();
+                await OnProcessStaleTasks();
             } catch
             {
-                await OnDemotedToFollower();
+                if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                {
+                    await OnDemotedToFollower();
+                }
             }
         }
 
@@ -395,18 +435,28 @@ namespace Relay
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
-            if (_processingOutbox)
+            if (_processingOutbox || _dbConnection == null)
             {
                 return;
             }
 
             _processingOutbox = true;
-            await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             try
             {
-                AppMetrics.Relay.OutboxDepth.Set(await context.Outbox.CountAsync());
-                var oldest = await context.Outbox.MinAsync(t => (DateTime?)t.CreatedAt);
+                long depth;
+                await using (var countCmd = new NpgsqlCommand("SELECT COUNT(*) FROM outbox", _dbConnection))
+                {
+                    depth = (long)(await countCmd.ExecuteScalarAsync())!;
+                }
+                AppMetrics.Relay.OutboxDepth.Set(depth);
+
+                DateTime? oldest;
+                await using (var oldestCmd = new NpgsqlCommand("SELECT MIN(\"CreatedAt\") FROM outbox", _dbConnection))
+                {
+                    var result = await oldestCmd.ExecuteScalarAsync();
+                    oldest = result is null or DBNull ? null : (DateTime?)result;
+                }
                 AppMetrics.Relay.OutboxOldestUnpublishedSeconds.Set(
                     oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
             }
@@ -420,16 +470,34 @@ namespace Relay
 
             while (true)
             {
-                List<OutboxWorkItem> tasks;
+                List<OutboxWorkItem> tasks = new();
 
                 try
                 {
-                    tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
-                } 
+                    await using var readCmd = new NpgsqlCommand("SELECT * FROM outbox ORDER BY \"Id\" LIMIT @limit",_dbConnection);
+                    readCmd.Parameters.AddWithValue("limit", pageSize * page);
+                    await using var reader = await readCmd.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        tasks.Add(new OutboxWorkItem
+                        {
+                            Id = reader.GetInt64(reader.GetOrdinal("Id")),
+                            TaskId = reader.GetGuid(reader.GetOrdinal("TaskId")),
+                            CorrelationId = reader.GetGuid(reader.GetOrdinal("CorrelationId")),
+                            IdempotencyId = reader.GetString(reader.GetOrdinal("IdempotencyId")),
+                            Url = reader.GetString(reader.GetOrdinal("Url")),
+                            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+                            SentAt = reader.IsDBNull(reader.GetOrdinal("SentAt")) ? null : reader.GetDateTime(reader.GetOrdinal("SentAt")),
+                            PublishedAt = reader.IsDBNull(reader.GetOrdinal("PublishedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("PublishedAt")),
+                            NextAttemptAt = reader.IsDBNull(reader.GetOrdinal("NextAttemptAt")) ? null : reader.GetDateTime(reader.GetOrdinal("NextAttemptAt")),
+                            Attempt = reader.GetInt32(reader.GetOrdinal("Attempt"))
+                        });
+                    }
+                }
                 catch (Exception ex)
                 {
                     //Database not ready yet.
-                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.Outbox));
+                    _logger.LogError(ex, "Error trying to read outbox, skipping process");
                     break;
                 }
 
@@ -441,19 +509,23 @@ namespace Relay
                 try
                 {
                     var ids = await SendMessagesToBroker(tasks);
-                    await context.Database.BeginTransactionAsync();
+                    await using var tx = await _dbConnection.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
+                        await using var updateCmd = new NpgsqlCommand(
+                            "UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = @taskId",
+                            _dbConnection, tx);
+                        updateCmd.Parameters.AddWithValue("taskId", id);
+                        await updateCmd.ExecuteNonQueryAsync();
                     }
-                    await context.Database.CommitTransactionAsync();
+                    await tx.CommitAsync();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Unexpected error occurred while sending outbox tasks");
                     break;
                 }
-                
+
                 page++;
             }
 
@@ -466,21 +538,29 @@ namespace Relay
         /// </summary>
         private async Task OnProcessStaleTasks()
         {
-            return;
-            if (_processingStale)
+            if (_processingStale || _dbConnection == null)
             {
                 return;
             }
 
             _processingStale = true;
-            await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             try
             {
-                AppMetrics.Relay.StaleDepth.Set(await context.StaleTasks.CountAsync());
-                var oldest = await context.StaleTasks.MinAsync(t => t.SentAt);
-                AppMetrics.Relay.StaleOldestSeconds.Set(
-                    oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
+                long depth;
+                await using (var countCmd = new NpgsqlCommand("SELECT COUNT(*) FROM staletasks", _dbConnection))
+                {
+                    depth = (long)(await countCmd.ExecuteScalarAsync())!;
+                }
+                AppMetrics.Relay.StaleDepth.Set(depth);
+
+                DateTime? oldest;
+                await using (var oldestCmd = new NpgsqlCommand("SELECT MIN(\"SentAt\") FROM staletasks", _dbConnection))
+                {
+                    var result = await oldestCmd.ExecuteScalarAsync();
+                    oldest = result is null or DBNull ? null : (DateTime?)result;
+                }
+                AppMetrics.Relay.StaleOldestSeconds.Set(oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
             }
             catch (Exception ex)
             {
@@ -492,16 +572,34 @@ namespace Relay
 
             while (true)
             {
-                List<StaleWorkItem> staleTasks;
+                List<StaleWorkItem> staleTasks = new();
 
                 try
                 {
-                    staleTasks = await context.StaleTasks.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                    await using var readCmd = new NpgsqlCommand("SELECT * FROM staletasks ORDER BY \"Id\" LIMIT @limit",_dbConnection);
+                    readCmd.Parameters.AddWithValue("limit", pageSize * page);
+                    await using var reader = await readCmd.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        staleTasks.Add(new StaleWorkItem
+                        {
+                            Id = reader.GetInt64(reader.GetOrdinal("Id")),
+                            TaskId = reader.GetGuid(reader.GetOrdinal("TaskId")),
+                            CorrelationId = reader.GetGuid(reader.GetOrdinal("CorrelationId")),
+                            IdempotencyId = reader.GetString(reader.GetOrdinal("IdempotencyId")),
+                            Url = reader.GetString(reader.GetOrdinal("Url")),
+                            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+                            SentAt = reader.IsDBNull(reader.GetOrdinal("SentAt")) ? null : reader.GetDateTime(reader.GetOrdinal("SentAt")),
+                            PublishedAt = reader.IsDBNull(reader.GetOrdinal("PublishedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("PublishedAt")),
+                            NextAttemptAt = reader.IsDBNull(reader.GetOrdinal("NextAttemptAt")) ? null : reader.GetDateTime(reader.GetOrdinal("NextAttemptAt")),
+                            Attempt = reader.GetInt32(reader.GetOrdinal("Attempt"))
+                        });
+                    }
                 }
                 catch (Exception ex)
                 {
                     //Database not ready yet.
-                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.StaleTasks));
+                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", "staletasks");
                     break;
                 }
 
@@ -513,29 +611,29 @@ namespace Relay
                 try
                 {
                     var ids = await SendMessagesToBroker(staleTasks);
-                    await context.Database.BeginTransactionAsync();
-                    foreach (var id in ids)
+                    await using var tx = await _dbConnection.BeginTransactionAsync();
+                    foreach (var staleTask in staleTasks.Where(t => ids.Contains(t.TaskId)))
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
-                        //Raising conflict for stale task retry.
-
-                        var job = await context.Tasks.FirstOrDefaultAsync(t => t.TaskId == id);
-                        if (job == null)
+                        await using (var updateCmd = new NpgsqlCommand(
+                            "UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = @taskId",
+                            _dbConnection, tx))
                         {
-                            _logger.LogError("Failed to resubmit task {id}, task doesn't exist", id);
-                            continue;
+                            updateCmd.Parameters.AddWithValue("taskId", staleTask.TaskId);
+                            await updateCmd.ExecuteNonQueryAsync();
                         }
 
-                        context.Add(new Conflict()
-                        {
-                            TaskId = job.TaskId,
-                            CorrelationId = job.CorrelationId,
-                            IdempotencyId = job.IdempotencyId,
-                            Reason = "Stale reaper picked up and resubmitted task.",
-                            Attempt = job.Attempt
-                        });
+                        //Raising conflict for stale task retry.
+                        await using var insertCmd = new NpgsqlCommand(
+                            "INSERT INTO \"Conflicts\" (\"TaskId\", \"CorrelationId\", \"IdempotencyId\", \"Reason\", \"Attempt\") VALUES (@taskId, @correlationId, @idempotencyId, @reason, @attempt)",
+                            _dbConnection, tx);
+                        insertCmd.Parameters.AddWithValue("taskId", staleTask.TaskId);
+                        insertCmd.Parameters.AddWithValue("correlationId", staleTask.CorrelationId);
+                        insertCmd.Parameters.AddWithValue("idempotencyId", staleTask.IdempotencyId);
+                        insertCmd.Parameters.AddWithValue("reason", "Stale reaper picked up and resubmitted task.");
+                        insertCmd.Parameters.AddWithValue("attempt", staleTask.Attempt);
+                        await insertCmd.ExecuteNonQueryAsync();
                     }
-                    await context.Database.CommitTransactionAsync();
+                    await tx.CommitAsync();
                 }
                 catch (Exception ex)
                 {
