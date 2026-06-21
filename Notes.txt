@@ -602,3 +602,8 @@ Ok so there would be a table called leader or something with a single row, which
 - Leadership election working, need to incorporate the actual sending of data back in again, maybe start spawning in multiple workers.
 - Might need to toss away the notification listen event, which isn't the biggest deal
 - Because of how NPSql handles events, WaitAsync is required to receive events (like calling recv on the wire) but when I call WaitAsync I'm blocking everything else the connection could be doing.
+
+22/06/26
+- Reason why I need to throw away the notification listen event is due to wanting to use the dbconnection object itself as my lock, since I need to use that connection everywhere, WaitAsync will block any use of it.
+- Ok I've migrated everything to use the global _dbConnection variable, produced a lot of bloat code but that's to be expected 
+- Needing to add semaphores around all the methods that use the _dbConnection because it freaks out if it's being used, feel like I chose a bad pattern to use for this leader election 
