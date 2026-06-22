@@ -29,13 +29,11 @@ namespace Relay
         private readonly Dictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
         private readonly HashSet<Guid> _pendingTasks;
 
-
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
-        private bool _lockAquired;
 
         #endregion
 
@@ -166,25 +164,12 @@ namespace Relay
             }
         }
 
-        private async Task OnTryAquireLock()
-        {
-            if (_lockAquired)
-            {
-                await Task.Yield();
-                return;
-            }
-
-
-        }
-
         /// <summary>
         /// Processes messages from the outbox queue in batches and sends them to the broker.
         /// </summary>
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
-            return;
-
             if (_processingOutbox)
             {
                 return;
@@ -256,7 +241,6 @@ namespace Relay
         /// </summary>
         private async Task OnProcessStaleTasks()
         {
-            return;
             if (_processingStale)
             {
                 return;

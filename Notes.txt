@@ -613,4 +613,5 @@ Ok so there would be a table called leader or something with a single row, which
 
 
 23/06/26
-- 
+- Changing the layout to use a fencing token in the leaderboard table, this will be used for all queries reads and writes, I'll need to have a way of keeping other nodes up to date or close to it with their tokens.
+- Shieet will need to bring the heartbeat back in, how else will other nodes detect that one has gone stale or died for that matter,
