@@ -610,3 +610,7 @@ Ok so there would be a table called leader or something with a single row, which
 - Yeah this pattern is terrible, all the methods require a semaphore around it, each poll heartbeat write, outbox poll stale tasks poll or acquire lock method are just gonna fight each other constantly for this semaphore
 - Going to reset which sucks because I put a lot of work into this. Think I'm just gonna go the fencing token route, that seems the most straightforward, I don't need seperate npsql connection objects to act as anything special, it doesn't produce a shit ton of bloat code as well
 - Because I'm a pig for the GitHub commit streaks, I'm gonna merge all of this into main, then create another branch where I reset it and start again to try and create fencing tokens 
+
+
+23/06/26
+- 
