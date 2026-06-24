@@ -614,4 +614,8 @@ Ok so there would be a table called leader or something with a single row, which
 
 23/06/26
 - Changing the layout to use a fencing token in the leaderboard table, this will be used for all queries reads and writes, I'll need to have a way of keeping other nodes up to date or close to it with their tokens.
-- Shieet will need to bring the heartbeat back in, how else will other nodes detect that one has gone stale or died for that matter,
+- Shieet will need to bring the heartbeat back in, how else will other nodes detect that one has gone stale or died for that matter
+
+
+24/06/26
+- Ok I think I've got the new structure down, so the heartbeat logic will remain the same but this time there will be a fencing token in the leadership table, this token will be incremented each time the leader changes, the leader then will hold onto that token and use it for any subsequent requests, if the token doesn't match the request will be declined at the leader demoted back to a follower.

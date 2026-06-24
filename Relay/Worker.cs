@@ -16,6 +16,14 @@ namespace Relay
 {
     public class Worker : BackgroundService
     {
+        #region Constants
+
+        private const int HeartbeatIntervalSeconds = 5;
+        private const int HeartbeatStaleSeconds = 15;
+        private const int PollIntervalSeconds = 5;
+
+        #endregion
+
         #region Fields
 
         private NpgsqlConnection? _dbConnection;
@@ -31,9 +39,12 @@ namespace Relay
 
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
+        private readonly Timer _pollTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
+        private bool _isLeader;
+        private long _myToken;
 
         #endregion
 
@@ -56,13 +67,18 @@ namespace Relay
 
             _outBoxTimer = new Timer(5000);
             _outBoxTimer.AutoReset = true;
-            _outBoxTimer.Enabled = true;
+            _outBoxTimer.Enabled = false;
             _outBoxTimer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
 
             _staleTimer = new Timer(10000);
             _staleTimer.AutoReset = true;
-            _staleTimer.Enabled = true;
+            _staleTimer.Enabled = false;
             _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
+
+            _pollTimer = new Timer(PollIntervalSeconds * 1000);
+            _pollTimer.AutoReset = true;
+            _pollTimer.Enabled = true;
+            _pollTimer.Elapsed += async (_, _) => await TryClaimLeadership();
 
             _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
             _pendingTasks = new HashSet<Guid>();
@@ -93,15 +109,156 @@ namespace Relay
                 }
             }
 
-            await OnProcessOutboxQueue();
+            await SeedLeaderRow(stoppingToken);
+            await TryClaimLeadership();
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 await _dbConnection
-                    .WaitAsync(stoppingToken)
+                    .WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), stoppingToken)
                     .ConfigureAwait(false);
+
+                await WriteHeartbeat();
             }
 
             await _dbConnection.DisposeAsync();
+        }
+
+        /// <summary>
+        /// Idempotently seeds the singleton Leader row with <c>Id=1</c>, <c>Token=0</c>
+        /// and an epoch <c>LastSeenAt</c> so the first claim attempt has something to match.
+        /// </summary>
+        private async Task SeedLeaderRow(CancellationToken cancellationToken)
+        {
+            const string sql = "INSERT INTO \"Leader\" (\"Id\", \"Token\", \"LastSeenAt\") VALUES (1, 0, 'epoch'::timestamptz) ON CONFLICT (\"Id\") DO NOTHING";
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed Leader row");
+            }
+        }
+
+        /// <summary>
+        /// Leader-side heartbeat write. Refreshes <c>LastSeenAt</c> on the singleton
+        /// Leader row, scoped by <c>Token = _myToken</c> so a deposed leader's heartbeat
+        /// hits 0 rows and triggers self-demotion.
+        /// </summary>
+        /// <returns>A task that completes once the update has returned.</returns>
+        private async Task WriteHeartbeat()
+        {
+            if (!_isLeader)
+            {
+                return;
+            }
+
+            const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp() WHERE \"Id\" = 1 AND \"Token\" = {0}";
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            try
+            {
+                var rows = await context.Database.ExecuteSqlRawAsync(sql, _myToken);
+                if (rows == 0)
+                {
+                    _logger.LogWarning("Heartbeat affected 0 rows, demoting (myToken={MyToken})", _myToken);
+                    await OnDemotedToFollower();
+                    return;
+                }
+                _logger.LogDebug("Wrote leader heartbeat, token={Token}", _myToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write leader heartbeat");
+            }
+        }
+
+        /// <summary>
+        /// Follower-side election attempt. Atomically bumps the fencing token and
+        /// refreshes <c>LastSeenAt</c> iff the current leader has gone stale
+        /// (<c>LastSeenAt &lt; now() - HeartbeatStaleSeconds</c>). On success transitions
+        /// this replica into the leader role.
+        /// </summary>
+        /// <returns>The new fencing token if leadership was claimed, null otherwise.</returns>
+        private async Task<long?> TryClaimLeadership()
+        {
+            if (_isLeader)
+            {
+                return null;
+            }
+
+            const string sql = @"
+                UPDATE ""Leader""
+                SET ""Token"" = ""Token"" + 1, ""LastSeenAt"" = clock_timestamp()
+                WHERE ""Id"" = 1 AND ""LastSeenAt"" < now() - make_interval(secs => @stale)
+                RETURNING ""Token""";
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            try
+            {
+                var conn = (NpgsqlConnection)context.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open)
+                {
+                    await conn.OpenAsync();
+                }
+
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("stale", (double)HeartbeatStaleSeconds);
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result is null or DBNull)
+                {
+                    return null;
+                }
+
+                var token = (long)result;
+                await OnAssignedLeader(token);
+                return token;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to attempt leadership claim");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Transitions this replica into the leader role: caches the fencing token,
+        /// disables the follower poll, enables leader-side timers, and kicks off an
+        /// immediate outbox drain.
+        /// </summary>
+        private async Task OnAssignedLeader(long token)
+        {
+            _myToken = token;
+            _isLeader = true;
+
+            _pollTimer.Enabled = false;
+            _outBoxTimer.Enabled = true;
+            _staleTimer.Enabled = true;
+
+            _logger.LogInformation("Promoted to leader, token={Token}", token);
+
+            await OnProcessOutboxQueue();
+        }
+
+        /// <summary>
+        /// Transitions this replica back to the follower role: clears the cached token,
+        /// disables leader-side timers, and re-enables the follower poll.
+        /// </summary>
+        private async Task OnDemotedToFollower()
+        {
+            _isLeader = false;
+            _myToken = 0;
+
+            _outBoxTimer.Enabled = false;
+            _staleTimer.Enabled = false;
+            _pollTimer.Enabled = true;
+
+            _logger.LogWarning("Demoted to follower");
+            await Task.Yield();
         }
 
         /// <summary>

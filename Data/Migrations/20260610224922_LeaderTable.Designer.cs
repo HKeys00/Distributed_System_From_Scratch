@@ -36,8 +36,8 @@ namespace Data.Migrations
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("PID")
-                        .HasColumnType("integer");
+                    b.Property<long>("Token")
+                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 
