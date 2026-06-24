@@ -26,6 +26,7 @@ namespace Relay
 
         #region Fields
 
+        private int _chaos = 0;
         private NpgsqlConnection? _dbConnection;
         private IConnection? _rabbitConnection;
         private IChannel? _rabbitChannel;
@@ -143,6 +144,15 @@ namespace Relay
 
             const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp() WHERE \"Id\" = 1 AND \"Token\" = {0}";
 
+            _chaos++;
+            if (_chaos == 5)
+            {
+                _logger.LogInformation("Starting GC Pause");
+
+                await Task.Delay(30000);
+                _logger.LogInformation("Ending GC Pause");
+
+            }
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             try
             {

@@ -308,7 +308,7 @@ namespace Worker_Node.Services
 
             foreach(var child in childUrls)
             {
-                //await context.Tasks.AddAsync(new WorkItem(child));
+                await context.Tasks.AddAsync(new WorkItem(child));
             }
 
             try
