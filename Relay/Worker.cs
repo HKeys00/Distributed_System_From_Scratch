@@ -91,37 +91,22 @@ namespace Relay
         /// <inheritdoc />
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-             var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
-            
+            var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
             _rabbitConnection = await factory.CreateConnectionAsync(stoppingToken);
-            
-            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
-            await _dbConnection.OpenAsync(stoppingToken);
-            _dbConnection.Notification += OnNotify;
-            await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
-            {
-                try
-                {
-                    await cmd.ExecuteNonQueryAsync(stoppingToken);
-                } catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to create listener for task_channel");
-                }
-            }
 
             await SeedLeaderRow(stoppingToken);
             await TryClaimLeadership();
 
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
-                await _dbConnection
-                    .WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), stoppingToken)
-                    .ConfigureAwait(false);
-
-                await WriteHeartbeat();
+                await Task.Delay(Timeout.Infinite, stoppingToken);
             }
+            catch (OperationCanceledException) { }
 
-            await _dbConnection.DisposeAsync();
+            if (_isLeader)
+            {
+                await OnDemotedToFollower();
+            }
         }
 
         /// <summary>
@@ -164,15 +149,15 @@ namespace Relay
                 var rows = await context.Database.ExecuteSqlRawAsync(sql, _myToken);
                 if (rows == 0)
                 {
-                    _logger.LogWarning("Heartbeat affected 0 rows, demoting (myToken={MyToken})", _myToken);
+                    _logger.LogWarning("Heartbeat affected 0 rows, leadership lost (myToken={MyToken})", _myToken);
                     await OnDemotedToFollower();
                     return;
                 }
-                _logger.LogDebug("Wrote leader heartbeat, token={Token}", _myToken);
+                _logger.LogInformation("Heartbeat OK, token={Token}", _myToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to write leader heartbeat");
+                _logger.LogError(ex, "Failed to write leader heartbeat (token={Token})", _myToken);
             }
         }
 
@@ -211,10 +196,12 @@ namespace Relay
                 var result = await cmd.ExecuteScalarAsync();
                 if (result is null or DBNull)
                 {
+                    _logger.LogInformation("Leadership claim declined - current leader still alive");
                     return null;
                 }
 
                 var token = (long)result;
+                _logger.LogInformation("Leadership claim won - current leader was stale, new token={Token}", token);
                 await OnAssignedLeader(token);
                 return token;
             }
@@ -227,8 +214,9 @@ namespace Relay
 
         /// <summary>
         /// Transitions this replica into the leader role: caches the fencing token,
-        /// disables the follower poll, enables leader-side timers, and kicks off an
-        /// immediate outbox drain.
+        /// disables the follower poll, enables leader-side timers, opens a dedicated
+        /// Postgres session for <c>LISTEN task_channel</c>, drains the outbox, and
+        /// runs the wait/heartbeat loop until demotion disposes the connection.
         /// </summary>
         private async Task OnAssignedLeader(long token)
         {
@@ -239,17 +227,54 @@ namespace Relay
             _outBoxTimer.Enabled = true;
             _staleTimer.Enabled = true;
 
-            _logger.LogInformation("Promoted to leader, token={Token}", token);
+            _logger.LogInformation("Promoted to LEADER (token={Token}) - enabling outbox/stale timers, disabling poll", token);
+
+            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
+            await _dbConnection.OpenAsync();
+            _dbConnection.Notification += OnNotify;
+
+            await using (var listenCmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
+            {
+                try
+                {
+                    await listenCmd.ExecuteNonQueryAsync();
+                    _logger.LogInformation("Subscribed to task_channel notifications");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to create listener for task_channel");
+                }
+            }
 
             await OnProcessOutboxQueue();
+
+            _logger.LogInformation("Entering leader heartbeat loop (interval={Interval}s)", HeartbeatIntervalSeconds);
+            while (_isLeader)
+            {
+                try
+                {
+                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
+                    await WriteHeartbeat();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Leader loop iteration failed (token={Token})", _myToken);
+                    break;
+                }
+            }
+            _logger.LogInformation("Exited leader heartbeat loop");
         }
 
         /// <summary>
         /// Transitions this replica back to the follower role: clears the cached token,
-        /// disables leader-side timers, and re-enables the follower poll.
+        /// disables leader-side timers, disposes the dedicated leader connection (which
+        /// also releases the LISTEN), and re-enables the follower poll.
         /// </summary>
         private async Task OnDemotedToFollower()
         {
+            var prevToken = _myToken;
+            _logger.LogWarning("Demoting from LEADER role (was token={Token})", prevToken);
+
             _isLeader = false;
             _myToken = 0;
 
@@ -257,8 +282,15 @@ namespace Relay
             _staleTimer.Enabled = false;
             _pollTimer.Enabled = true;
 
-            _logger.LogWarning("Demoted to follower");
-            await Task.Yield();
+            if (_dbConnection is not null)
+            {
+                _dbConnection.Notification -= OnNotify;
+                await _dbConnection.DisposeAsync();
+                _dbConnection = null;
+                _logger.LogInformation("Disposed leader DB session and unsubscribed from task_channel");
+            }
+
+            _logger.LogWarning("Now FOLLOWER - poll timer re-enabled (interval={Interval}s)", PollIntervalSeconds);
         }
 
         /// <summary>

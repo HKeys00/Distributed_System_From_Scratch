@@ -619,3 +619,6 @@ Ok so there would be a table called leader or something with a single row, which
 
 24/06/26
 - Ok I think I've got the new structure down, so the heartbeat logic will remain the same but this time there will be a fencing token in the leadership table, this token will be incremented each time the leader changes, the leader then will hold onto that token and use it for any subsequent requests, if the token doesn't match the request will be declined at the leader demoted back to a follower.
+
+25/06/26
+- I'm just gonna get claude to implement this, it's important that I still understand what's going in, but I don't need to write the code by hand
