@@ -4,6 +4,7 @@ using Shared.Constants;
 using Shared.DTOs;
 using Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -18,15 +19,13 @@ namespace Relay
     {
         #region Constants
 
-        private const int HeartbeatIntervalSeconds = 5;
-        private const int HeartbeatStaleSeconds = 15;
-        private const int PollIntervalSeconds = 5;
+        private const int HeartbeatIntervalSeconds = 10;
+        private const int HeartbeatStaleSeconds = 1;
 
         #endregion
 
         #region Fields
 
-        private int _chaos = 0;
         private NpgsqlConnection? _dbConnection;
         private IConnection? _rabbitConnection;
         private IChannel? _rabbitChannel;
@@ -46,6 +45,7 @@ namespace Relay
         private bool _processingStale;
         private bool _isLeader;
         private long _myToken;
+        private CancellationTokenSource? _leaderLoopCts;
 
         #endregion
 
@@ -76,7 +76,7 @@ namespace Relay
             _staleTimer.Enabled = false;
             _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
 
-            _pollTimer = new Timer(PollIntervalSeconds * 1000);
+            _pollTimer = new Timer(HeartbeatIntervalSeconds * 1000);
             _pollTimer.AutoReset = true;
             _pollTimer.Enabled = true;
             _pollTimer.Elapsed += async (_, _) => await TryClaimLeadership();
@@ -103,11 +103,28 @@ namespace Relay
                 await Task.Delay(Timeout.Infinite, stoppingToken);
             }
             catch (OperationCanceledException) { }
-
+            
             if (_isLeader)
             {
                 await OnDemotedToFollower();
             }
+        }
+
+        /// <summary>
+        /// Host shutdown hook. Demotes eagerly so the leader heartbeat loop's
+        /// <c>while (_isLeader)</c> condition flips before <see cref="BackgroundService.StopAsync"/>
+        /// cancels <c>stoppingToken</c>. Without this, an <see cref="ExecuteAsync"/> that's
+        /// stuck inside <see cref="OnAssignedLeader"/>'s loop never reaches the cancellation
+        /// catch and gets SIGKILLed when the Docker grace period expires.
+        /// </summary>
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Stop signal received, beginning graceful shutdown");
+            if (_isLeader)
+            {
+                await OnDemotedToFollower();
+            }
+            await base.StopAsync(cancellationToken);
         }
 
         /// <summary>
@@ -143,16 +160,6 @@ namespace Relay
             }
 
             const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp() WHERE \"Id\" = 1 AND \"Token\" = {0}";
-
-            _chaos++;
-            if (_chaos == 5)
-            {
-                _logger.LogInformation("Starting GC Pause");
-
-                await Task.Delay(30000);
-                _logger.LogInformation("Ending GC Pause");
-
-            }
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             try
             {
@@ -232,6 +239,7 @@ namespace Relay
         {
             _myToken = token;
             _isLeader = true;
+            _leaderLoopCts = new CancellationTokenSource();
 
             _pollTimer.Enabled = false;
             _outBoxTimer.Enabled = true;
@@ -263,8 +271,12 @@ namespace Relay
             {
                 try
                 {
-                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
+                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), _leaderLoopCts.Token);
                     await WriteHeartbeat();
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -278,7 +290,9 @@ namespace Relay
         /// <summary>
         /// Transitions this replica back to the follower role: clears the cached token,
         /// disables leader-side timers, disposes the dedicated leader connection (which
-        /// also releases the LISTEN), and re-enables the follower poll.
+        /// also releases the LISTEN), and re-enables the follower poll. If our token is
+        /// still the current one in the DB, backdate <c>LastSeenAt</c> so the next
+        /// candidate can claim immediately instead of waiting out the stale interval.
         /// </summary>
         private async Task OnDemotedToFollower()
         {
@@ -287,10 +301,33 @@ namespace Relay
 
             _isLeader = false;
             _myToken = 0;
+            _leaderLoopCts?.Cancel();
 
             _outBoxTimer.Enabled = false;
             _staleTimer.Enabled = false;
             _pollTimer.Enabled = true;
+
+            await using (var context = await _dbContextFactory.CreateDbContextAsync())
+            {
+                try
+                {
+                    var rows = await context.Database.ExecuteSqlRawAsync(
+                        "UPDATE \"Leader\" SET \"LastSeenAt\" = 'epoch'::timestamptz WHERE \"Id\" = 1 AND \"Token\" = {0}",
+                        prevToken);
+                    if (rows == 1)
+                    {
+                        _logger.LogInformation("Relinquished leadership cleanly (token={Token}) - LastSeenAt backdated", prevToken);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Skipped LastSeenAt clear, token={Token} no longer current", prevToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to clear LastSeenAt on demotion (token={Token})", prevToken);
+                }
+            }
 
             if (_dbConnection is not null)
             {
@@ -300,7 +337,10 @@ namespace Relay
                 _logger.LogInformation("Disposed leader DB session and unsubscribed from task_channel");
             }
 
-            _logger.LogWarning("Now FOLLOWER - poll timer re-enabled (interval={Interval}s)", PollIntervalSeconds);
+            _leaderLoopCts?.Dispose();
+            _leaderLoopCts = null;
+
+            _logger.LogWarning("Now FOLLOWER - poll timer re-enabled (interval={Interval}s)", HeartbeatIntervalSeconds);
         }
 
         /// <summary>
@@ -395,16 +435,35 @@ namespace Relay
             while (true)
             {
                 List<OutboxWorkItem> tasks;
+                bool tokenLost = false;
 
                 try
                 {
-                    tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
-                } 
+                    await using var fetchTx = await context.Database.BeginTransactionAsync();
+                    if (!await TryLockLeaderRowAsync(context, fetchTx))
+                    {
+                        tokenLost = true;
+                        tasks = new List<OutboxWorkItem>();
+                    }
+                    else
+                    {
+                        tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                        await fetchTx.CommitAsync();
+                    }
+                }
                 catch (Exception ex)
                 {
                     //Database not ready yet.
                     _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.Outbox));
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _logger.LogWarning("Outbox processing aborted - token {Token} no longer current", _myToken);
+                    _processingOutbox = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 if (tasks.Count == 0)
@@ -427,7 +486,7 @@ namespace Relay
                     _logger.LogError(ex, "Unexpected error occurred while sending outbox tasks");
                     break;
                 }
-                
+
                 page++;
             }
 
@@ -466,16 +525,35 @@ namespace Relay
             while (true)
             {
                 List<StaleWorkItem> staleTasks;
+                bool tokenLost = false;
 
                 try
                 {
-                    staleTasks = await context.StaleTasks.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                    await using var fetchTx = await context.Database.BeginTransactionAsync();
+                    if (!await TryLockLeaderRowAsync(context, fetchTx))
+                    {
+                        tokenLost = true;
+                        staleTasks = new List<StaleWorkItem>();
+                    }
+                    else
+                    {
+                        staleTasks = await context.StaleTasks.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                        await fetchTx.CommitAsync();
+                    }
                 }
                 catch (Exception ex)
                 {
                     //Database not ready yet.
                     _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.StaleTasks));
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _logger.LogWarning("Stale processing aborted - token {Token} no longer current", _myToken);
+                    _processingStale = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 if (staleTasks.Count == 0)
@@ -522,6 +600,25 @@ namespace Relay
             _processingStale = false;
         }
         
+        /// <summary>
+        /// Acquires a row lock on the singleton Leader row scoped to <see cref="_myToken"/>.
+        /// Returns true if we still hold leadership, false if our token has been superseded.
+        /// The caller releases the lock by committing or rolling back <paramref name="transaction"/>.
+        /// While the lock is held, concurrent <c>TryClaimLeadership</c> attempts block on the
+        /// row, preventing a new leader from being elected during the fetch.
+        /// </summary>
+        private async Task<bool> TryLockLeaderRowAsync(ApplicationDbContext context, IDbContextTransaction transaction)
+        {
+            var conn = (NpgsqlConnection)context.Database.GetDbConnection();
+            var tx = (NpgsqlTransaction)transaction.GetDbTransaction();
+            await using var cmd = new NpgsqlCommand(
+                "SELECT \"Token\" FROM \"Leader\" WHERE \"Id\" = 1 AND \"Token\" = @token FOR UPDATE",
+                conn, tx);
+            cmd.Parameters.AddWithValue("token", _myToken);
+            var result = await cmd.ExecuteScalarAsync();
+            return result is not null and not DBNull;
+        }
+
         /// <summary>
         /// Sends a batch of outbox work items to the RabbitMQ broker, ensuring the channel and queue are properly
         /// initialized.
