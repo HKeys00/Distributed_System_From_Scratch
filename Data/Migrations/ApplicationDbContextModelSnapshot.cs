@@ -169,6 +169,9 @@ namespace Data.Migrations
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
 
+                    b.Property<long>("SentByToken")
+                        .HasColumnType("int8");
+
                     b.Property<Guid>("TaskId")
                         .HasColumnType("uuid");
 
@@ -209,6 +212,9 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
+
+                    b.Property<long>("SentByToken")
+                        .HasColumnType("int8");
 
                     b.Property<Guid>("TaskId")
                         .HasColumnType("uuid");
@@ -257,6 +263,9 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
+
+                    b.Property<long>("SentByToken")
+                        .HasColumnType("int8");
 
                     b.Property<Guid>("TaskId")
                         .HasColumnType("uuid");

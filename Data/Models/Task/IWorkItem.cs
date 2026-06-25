@@ -69,5 +69,13 @@ namespace Data.Models.Task
         /// Number of times the relay has sent this message.
         /// </summary>
         public int Attempt { get; set; }
+
+        /// <summary>
+        /// Fencing token of the relay leader that most recently published this task.
+        /// Defaults to 0 (no real leader ever holds token 0 — the seed value is bumped
+        /// to 1 on the first claim) which signals the task hasn't been sent yet.
+        /// </summary>
+        [Column(TypeName = "int8")]
+        public long SentByToken { get; set; }
     }
 }

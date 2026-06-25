@@ -629,3 +629,7 @@ Ok so there would be a table called leader or something with a single row, which
 - Added token checking before the stale and outbox tasks batching
 - Running through claude suggested failure cases before I can move onto the next topic
 - Lease time out has been set to 15s and intervals 5s, I could probably tighten this but there's no real pressing need to. There's now clean shut down functionality where if the leader is told to shut down it will clean the last_seen_at column so that a follower can immediately pick up as leader on the next poll cycle. 
+- There is a check for the token in the same query as the outbox query using  "SELECT \"Token\" FROM \"Leader\" WHERE \"Id\" = 1 AND \"Token\" = @token FOR UPDATE" introduced to the FOR UPDATE in Postgres logic for locking a row, this is in the same transaction
+
+26/06/26
+- Going to add a published by token field that lives on the tasks object, it's going to default to a value of 0. The reason for this is because currently a zombie leader could poll the outbox view, publish and then pause before updating the tasks as sent, this would mean another leader would publish and update the tasks then when the old leader came back it would adjust the sentAt to the incorrect time, not critical but it's worth adding for cleanliness and too add a prometheus metric to track how often this is happening.

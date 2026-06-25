@@ -72,7 +72,8 @@ namespace Data.Migrations
                     SentAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     PublishedAt = table.Column<DateTime>(type: "timestamptz", nullable: true),
                     NextAttemptAt = table.Column<DateTime>(type: "timestamptz", nullable: true, defaultValueSql: "clock_timestamp()"),
-                    Attempt = table.Column<int>(type: "integer", nullable: false)
+                    Attempt = table.Column<int>(type: "integer", nullable: false),
+                    SentByToken = table.Column<long>(type: "int8", nullable: false, defaultValue: 0L)
                 },
                 constraints: table =>
                 {

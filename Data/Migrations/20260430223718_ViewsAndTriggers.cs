@@ -21,8 +21,8 @@ namespace Data.Migrations
             ");
 
             migrationBuilder.Sql("CREATE TRIGGER insert_trigger AFTER INSERT ON \"Tasks\" FOR EACH ROW EXECUTE FUNCTION notify_change();");
-            migrationBuilder.Sql("CREATE VIEW Outbox AS SELECT * FROM \"Tasks\" WHERE \"SentAt\" IS NULL AND \"NextAttemptAt\" <= clock_timestamp() AND \"Attempt\" < 5 AND NOT EXISTS (SELECT 1 FROM \"Successes\" WHERE \"IdempotencyId\" = \"Tasks\".\"IdempotencyId\")");
-            migrationBuilder.Sql("CREATE VIEW StaleTasks AS SELECT * FROM \"Tasks\" WHERE \"SentAt\" IS NOT NULL AND \"SentAt\" < clock_timestamp() - INTERVAL '120 seconds' AND NOT EXISTS (SELECT 1 FROM \"Successes\" WHERE \"IdempotencyId\" = \"Tasks\".\"IdempotencyId\") AND NOT EXISTS (SELECT 1 FROM \"Conflicts\" WHERE \"TaskId\" = \"Tasks\".\"TaskId\" AND \"Attempt\" = \"Tasks\".\"Attempt\")");
+            migrationBuilder.Sql("CREATE VIEW Outbox AS SELECT \"Id\", \"TaskId\", \"CorrelationId\", \"IdempotencyId\", \"Url\", \"CreatedAt\", \"SentAt\", \"PublishedAt\", \"NextAttemptAt\", \"Attempt\", \"SentByToken\" FROM \"Tasks\" WHERE \"SentAt\" IS NULL AND \"NextAttemptAt\" <= clock_timestamp() AND \"Attempt\" < 5 AND NOT EXISTS (SELECT 1 FROM \"Successes\" WHERE \"IdempotencyId\" = \"Tasks\".\"IdempotencyId\")");
+            migrationBuilder.Sql("CREATE VIEW StaleTasks AS SELECT \"Id\", \"TaskId\", \"CorrelationId\", \"IdempotencyId\", \"Url\", \"CreatedAt\", \"SentAt\", \"PublishedAt\", \"NextAttemptAt\", \"Attempt\", \"SentByToken\" FROM \"Tasks\" WHERE \"SentAt\" IS NOT NULL AND \"SentAt\" < clock_timestamp() - INTERVAL '120 seconds' AND NOT EXISTS (SELECT 1 FROM \"Successes\" WHERE \"IdempotencyId\" = \"Tasks\".\"IdempotencyId\") AND NOT EXISTS (SELECT 1 FROM \"Conflicts\" WHERE \"TaskId\" = \"Tasks\".\"TaskId\" AND \"Attempt\" = \"Tasks\".\"Attempt\")");
         }
 
         /// <inheritdoc />
