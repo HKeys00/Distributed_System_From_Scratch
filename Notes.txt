@@ -628,3 +628,4 @@ Ok so there would be a table called leader or something with a single row, which
 - had a goal of having a sub 5 second failover time, that might have worked with the previous advisory lock pattern but it won't work for this, so I'm relaxing that constraint to 15-20 seconds
 - Added token checking before the stale and outbox tasks batching
 - Running through claude suggested failure cases before I can move onto the next topic
+- Lease time out has been set to 15s and intervals 5s, I could probably tighten this but there's no real pressing need to. There's now clean shut down functionality where if the leader is told to shut down it will clean the last_seen_at column so that a follower can immediately pick up as leader on the next poll cycle. 
