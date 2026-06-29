@@ -633,3 +633,8 @@ Ok so there would be a table called leader or something with a single row, which
 
 26/06/26
 - Going to add a published by token field that lives on the tasks object, it's going to default to a value of 0. The reason for this is because currently a zombie leader could poll the outbox view, publish and then pause before updating the tasks as sent, this would mean another leader would publish and update the tasks then when the old leader came back it would adjust the sentAt to the incorrect time, not critical but it's worth adding for cleanliness and too add a prometheus metric to track how often this is happening.
+
+30/06/26
+- Finished fencing token work
+- Added support for multiple acks on ack acknowledge
+- Going to start working on sharpening up the publisher confirms, there's a few edge cases like what happens when the process dies and there are still tasks sitting in the _unackedTasks list, what happens when a task isn't marked as published, I'm not 100% sure I need to double check

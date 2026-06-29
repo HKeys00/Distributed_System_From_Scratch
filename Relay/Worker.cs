@@ -35,7 +35,6 @@ namespace Relay
         private readonly ILogger<Worker> _logger;
 
         private readonly Dictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
-        private readonly HashSet<Guid> _pendingTasks;
 
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
@@ -82,7 +81,6 @@ namespace Relay
             _pollTimer.Elapsed += async (_, _) => await TryClaimLeadership();
 
             _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
-            _pendingTasks = new HashSet<Guid>();
         }
 
         #endregion
@@ -397,10 +395,33 @@ namespace Relay
             {
                 _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to mark task as published",
                     task.CorrelationId, task.TaskId);
-            } finally
-            {
-                _pendingTasks.Remove(task.TaskId);
             }
+        }
+
+        /// <summary>
+        /// Handles a broker nack for a previously published outbox message. Drops the
+        /// in-memory tracking so the slot doesn't leak; the row's <c>PublishedAt</c> stays
+        /// null so the stale reaper will eventually re-dispatch it.
+        /// </summary>
+        private async Task OnNackReturn(object sender, BasicNackEventArgs args)
+        {
+            using var deliveryScope = _logger.BeginScope(new Dictionary<string, object>
+            {
+                ["DeliveryTag"] = args.DeliveryTag
+            });
+
+            var removed = _unAckedTasks.Remove(args.DeliveryTag, out var entry);
+            if (!removed)
+            {
+                await Task.Yield();
+                return;
+            }
+
+            AppMetrics.Relay.OutboxNacks.Inc();
+            var (task, _) = entry;
+            _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Broker nacked publish - stale reaper will retry",
+                task.CorrelationId, task.TaskId);
+            await Task.Yield();
         }
 
         /// <summary>
@@ -477,7 +498,14 @@ namespace Relay
                     await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
+                        var rows = await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"SentByToken\" = {0} WHERE \"SentByToken\" <= {0} AND \"TaskId\" = {1}", _myToken, id);
+                        if (rows == 0)
+                        {
+                            AppMetrics.Relay.StaleTokenTaskUpdates.Inc();
+                            _logger.LogWarning("Outbox task update rejected - token {Token} superseded (TaskId={TaskId})", _myToken, id);
+                            tokenLost = true;
+                            break;
+                        }
                     }
                     await context.Database.CommitTransactionAsync();
                 }
@@ -485,6 +513,13 @@ namespace Relay
                 {
                     _logger.LogError(ex, "Unexpected error occurred while sending outbox tasks");
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _processingOutbox = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 page++;
@@ -567,7 +602,14 @@ namespace Relay
                     await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", id);
+                        var rows = await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"SentByToken\" = {0} WHERE \"SentByToken\" <= {0} AND \"TaskId\" = {1}", _myToken, id);
+                        if (rows == 0)
+                        {
+                            AppMetrics.Relay.StaleTokenTaskUpdates.Inc();
+                            _logger.LogWarning("Stale task update rejected - token {Token} superseded (TaskId={TaskId})", _myToken, id);
+                            tokenLost = true;
+                            break;
+                        }
                         //Raising conflict for stale task retry.
 
                         var job = await context.Tasks.FirstOrDefaultAsync(t => t.TaskId == id);
@@ -592,6 +634,13 @@ namespace Relay
                 {
                     _logger.LogError(ex, "Unexpected error occurred while sending stale tasks");
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _processingStale = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 page++;
@@ -684,8 +733,9 @@ namespace Relay
 
             if (_rabbitChannel == null || _rabbitChannel.IsClosed)
             {
-                _rabbitChannel = await _rabbitConnection.CreateChannelAsync(new CreateChannelOptions(true, true));
+                _rabbitChannel = await _rabbitConnection.CreateChannelAsync(new CreateChannelOptions(true, false));
                 _rabbitChannel.BasicAcksAsync += OnAckReturn;
+                _rabbitChannel.BasicNacksAsync += OnNackReturn;
 
                 await _rabbitChannel.QueueDeclareAsync(queue: "outbox",
                     durable: true, exclusive: false,
