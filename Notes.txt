@@ -638,3 +638,4 @@ Ok so there would be a table called leader or something with a single row, which
 - Finished fencing token work
 - Added support for multiple acks on ack acknowledge
 - Going to start working on sharpening up the publisher confirms, there's a few edge cases like what happens when the process dies and there are still tasks sitting in the _unackedTasks list, what happens when a task isn't marked as published, I'm not 100% sure I need to double check
+- Need to address a race condition as well where the _unackedTasks can be added too and removed from on different threads
