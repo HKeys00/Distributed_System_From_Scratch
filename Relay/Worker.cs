@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
@@ -34,7 +35,7 @@ namespace Relay
         private readonly IConfiguration _configuration;
         private readonly ILogger<Worker> _logger;
 
-        private readonly Dictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
+        private readonly ConcurrentDictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
 
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
@@ -80,7 +81,7 @@ namespace Relay
             _pollTimer.Enabled = true;
             _pollTimer.Elapsed += async (_, _) => await TryClaimLeadership();
 
-            _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
+            _unAckedTasks = new ConcurrentDictionary<ulong, (IWorkItem, long)>();
         }
 
         #endregion
@@ -360,41 +361,38 @@ namespace Relay
         /// message properties.</param>
         private async Task OnAckReturn(object sender, BasicAckEventArgs args)
         {
-            using var deliveryScope = _logger.BeginScope(new Dictionary<string, object>
+            var drained = DrainConfirmedTags(args.DeliveryTag, args.Multiple);
+            if (drained.Count == 0)
             {
-                ["DeliveryTag"] = args.DeliveryTag
-            });
-
-            var removed = _unAckedTasks.Remove(args.DeliveryTag, out var entry);
-            if (!removed)
-            {
-                //Acking a task that has already either been re sent or marked as acked, either way ignore and keep going.
-                //_logger.LogWarning("Ack received for task that has already been resent or marked as acked");
                 await Task.Yield();
                 return;
             }
 
-            var (task, publishedAt) = entry;
-            AppMetrics.Relay.OutboxPublishAckSeconds.Observe(Stopwatch.GetElapsedTime(publishedAt).TotalSeconds);
-
-            using var taskScope = _logger.BeginScope(new Dictionary<string, object>
-            {
-                [CorrelationConstants.LogScopeKey] = task.CorrelationId,
-                ["TaskId"] = task.TaskId
-            });
-
             await using var context = await _dbContextFactory.CreateDbContextAsync();
-            try
+            foreach (var (_, entry) in drained)
             {
-                await context.Database.BeginTransactionAsync();
-                await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
-                await context.Database.CommitTransactionAsync();
-                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Task received by broker",
-                    task.CorrelationId, task.TaskId);
-            } catch (Exception ex)
-            {
-                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to mark task as published",
-                    task.CorrelationId, task.TaskId);
+                var (task, publishedAt) = entry;
+                AppMetrics.Relay.OutboxPublishAckSeconds.Observe(Stopwatch.GetElapsedTime(publishedAt).TotalSeconds);
+
+                using var taskScope = _logger.BeginScope(new Dictionary<string, object>
+                {
+                    [CorrelationConstants.LogScopeKey] = task.CorrelationId,
+                    ["TaskId"] = task.TaskId
+                });
+
+                try
+                {
+                    await context.Database.BeginTransactionAsync();
+                    await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
+                    await context.Database.CommitTransactionAsync();
+                    _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Task received by broker",
+                        task.CorrelationId, task.TaskId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to mark task as published",
+                        task.CorrelationId, task.TaskId);
+                }
             }
         }
 
@@ -405,23 +403,47 @@ namespace Relay
         /// </summary>
         private async Task OnNackReturn(object sender, BasicNackEventArgs args)
         {
-            using var deliveryScope = _logger.BeginScope(new Dictionary<string, object>
-            {
-                ["DeliveryTag"] = args.DeliveryTag
-            });
-
-            var removed = _unAckedTasks.Remove(args.DeliveryTag, out var entry);
-            if (!removed)
+            var drained = DrainConfirmedTags(args.DeliveryTag, args.Multiple);
+            if (drained.Count == 0)
             {
                 await Task.Yield();
                 return;
             }
 
-            AppMetrics.Relay.OutboxNacks.Inc();
-            var (task, _) = entry;
-            _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Broker nacked publish - stale reaper will retry",
-                task.CorrelationId, task.TaskId);
+            foreach (var (_, entry) in drained)
+            {
+                AppMetrics.Relay.OutboxNacks.Inc();
+                var (task, _) = entry;
+                _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Broker nacked publish - stale reaper will retry",
+                    task.CorrelationId, task.TaskId);
+            }
             await Task.Yield();
+        }
+
+        /// <summary>
+        /// Removes and returns the set of un-acked entries covered by a broker confirm.
+        /// When <paramref name="multiple"/> is true the broker is confirming every delivery
+        /// tag up to and including <paramref name="deliveryTag"/> in a single frame; otherwise
+        /// only the exact tag is drained.
+        /// </summary>
+        private List<(ulong tag, (IWorkItem item, long publishedAt) entry)> DrainConfirmedTags(ulong deliveryTag, bool multiple)
+        {
+            var drained = new List<(ulong, (IWorkItem, long))>();
+            if (multiple)
+            {
+                foreach (var tag in _unAckedTasks.Keys.Where(t => t <= deliveryTag).ToList())
+                {
+                    if (_unAckedTasks.TryRemove(tag, out var entry))
+                    {
+                        drained.Add((tag, entry));
+                    }
+                }
+            }
+            else if (_unAckedTasks.TryRemove(deliveryTag, out var entry))
+            {
+                drained.Add((deliveryTag, entry));
+            }
+            return drained;
         }
 
         /// <summary>
@@ -696,7 +718,7 @@ namespace Relay
                 });
 
                 var deliveryTag = batchStartingNumber + (ulong)i;
-                _unAckedTasks.Add(deliveryTag, (workItem, Stopwatch.GetTimestamp()));
+                _unAckedTasks.TryAdd(deliveryTag, (workItem, Stopwatch.GetTimestamp()));
                 try
                 {
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
@@ -707,7 +729,7 @@ namespace Relay
                 }
                 catch (Exception ex)
                 {
-                    _unAckedTasks.Remove(deliveryTag);
+                    _unAckedTasks.TryRemove(deliveryTag, out _);
                     AppMetrics.Relay.OutboxPublishes.WithLabels("fail").Inc();
                     _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Message failed to send across rabbit channel",
                         workItem.CorrelationId, workItem.TaskId);
