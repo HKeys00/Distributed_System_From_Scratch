@@ -27,6 +27,10 @@ failures += await Run("chaos_sigkill", () => ChaosSigkillAsync(
     db, workload, count: 100, urlTemplate: $"{StubBaseFromContainer}/ok?n={{n}}",
     timeout: TimeSpan.FromMinutes(5)));
 
+failures += await Run("chaos_sigterm_graceful_shutdown", () => ChaosSigtermGracefulAsync(
+    db, workload, count: 50, urlTemplate: $"{StubBaseFromContainer}/ok?n={{n}}",
+    timeout: TimeSpan.FromMinutes(5)));
+
 failures += await Run("rate_limit_same_domain", () => RateLimitAsync(
     db, workload, count: 100, urlTemplate: $"{StubBaseFromContainer}/ok?id={{n}}&v={{n}}",
     minElapsed: TimeSpan.FromSeconds(60), timeout: TimeSpan.FromMinutes(5)));
@@ -97,6 +101,78 @@ static async Task<bool> ChaosSigkillAsync(
     return AssertExpectation(ids.Count, final, Expectation.AllSuccess)
         && await AssertNoDuplicatesAsync(db, ids)
         && killed;
+}
+
+static async Task<bool> ChaosSigtermGracefulAsync(
+    DbAccess db, Workload workload, int count, string urlTemplate, TimeSpan timeout)
+{
+    await db.TruncateAllAsync();
+    var ids = await workload.SubmitAsync(count, urlTemplate);
+    Console.WriteLine($"submitted {ids.Count} tasks");
+
+    // Give the current leader time to emit at least one "Heartbeat OK" so FindLeaderAsync
+    // can spot it in the recent log window.
+    await Task.Delay(TimeSpan.FromSeconds(8));
+
+    var relays = await FaultInjector.GetServiceContainersAsync("relay");
+    if (relays.Count == 0)
+    {
+        Console.WriteLine("  invariant FAIL: no relay containers found");
+        return false;
+    }
+    Console.WriteLine($"found {relays.Count} relay replicas: {string.Join(", ", relays)}");
+
+    var leader = await FaultInjector.FindLeaderAsync(relays);
+    if (leader is null)
+    {
+        Console.WriteLine("  invariant FAIL: could not identify current leader from recent logs");
+        return false;
+    }
+    Console.WriteLine($"current leader: {leader}");
+
+    var initialToken = await db.GetLeaderTokenAsync();
+    Console.WriteLine($"initial leader token: {initialToken}");
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    Console.WriteLine($"SIGTERM {leader}");
+    await FaultInjector.SigtermAsync(leader);
+
+    var detectDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+    long newToken = initialToken;
+    while (DateTime.UtcNow < detectDeadline)
+    {
+        newToken = await db.GetLeaderTokenAsync();
+        if (newToken > initialToken) break;
+        await Task.Delay(250);
+    }
+    sw.Stop();
+
+    var bumped = newToken > initialToken;
+    if (!bumped)
+    {
+        Console.WriteLine($"  invariant FAIL: no token bump within {sw.Elapsed.TotalSeconds:F1}s after SIGTERM");
+    }
+    else
+    {
+        Console.WriteLine($"failover: token {initialToken} -> {newToken} in {sw.Elapsed.TotalSeconds:F1}s");
+    }
+
+    // With the graceful-shutdown LastSeenAt backdate, a follower's next poll (~5s)
+    // claims leadership. Without the backdate it would wait out the 15s stale interval.
+    // 10s leaves headroom for poll jitter while still proving we're well under 15s.
+    var fastFailover = bumped && sw.Elapsed.TotalSeconds < 10;
+    if (bumped && !fastFailover)
+    {
+        Console.WriteLine($"  invariant FAIL: failover took {sw.Elapsed.TotalSeconds:F1}s, expected < 10s with graceful shutdown");
+    }
+
+    await FaultInjector.StartAsync(leader);
+    Console.WriteLine($"restarted {leader}");
+
+    var counts = await PollUntilTerminalAsync(db, ids, timeout);
+    return AssertExpectation(ids.Count, counts, Expectation.AllSuccess)
+        && await AssertNoDuplicatesAsync(db, ids)
+        && fastFailover;
 }
 
 static async Task<bool> RateLimitAsync(

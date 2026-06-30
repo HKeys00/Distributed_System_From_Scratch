@@ -50,6 +50,14 @@ public static class AppMetrics
         public static readonly Gauge StaleOldestSeconds = Metrics.CreateGauge(
             "relay_stale_oldest_age_seconds",
             "Age, in seconds, since the oldest stale task was last dispatched (0 if empty).");
+
+        public static readonly Counter StaleTokenTaskUpdates = Metrics.CreateCounter(
+            "relay_stale_token_task_updates_total",
+            "Number of task update attempts rejected because the relay's fencing token was no longer current.");
+
+        public static readonly Counter OutboxNacks = Metrics.CreateCounter(
+            "relay_outbox_nacks_total",
+            "Number of outbox publishes rejected by the broker via basic.nack.");
     }
 
     public static class Worker

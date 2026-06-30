@@ -4,6 +4,6 @@ namespace Data.Models
     {
         public int Id {get; set;}
         public DateTime LastSeenAt {get; set;}
-        public int PID {get; set;}
+        public long Token {get; set;}
     }
 }

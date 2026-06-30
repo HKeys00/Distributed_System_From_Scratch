@@ -36,8 +36,8 @@ namespace Data.Migrations
                     b.Property<DateTime>("LastSeenAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int>("PID")
-                        .HasColumnType("integer");
+                    b.Property<long>("Token")
+                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 
@@ -172,6 +172,9 @@ namespace Data.Migrations
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
 
+                    b.Property<long>("SentByToken")
+                        .HasColumnType("int8");
+
                     b.Property<Guid>("TaskId")
                         .HasColumnType("uuid");
 
@@ -212,6 +215,9 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
+
+                    b.Property<long>("SentByToken")
+                        .HasColumnType("int8");
 
                     b.Property<Guid>("TaskId")
                         .HasColumnType("uuid");
@@ -260,6 +266,9 @@ namespace Data.Migrations
 
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamptz");
+
+                    b.Property<long>("SentByToken")
+                        .HasColumnType("int8");
 
                     b.Property<Guid>("TaskId")
                         .HasColumnType("uuid");

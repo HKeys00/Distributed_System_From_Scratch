@@ -4,12 +4,15 @@ using Shared.Constants;
 using Shared.DTOs;
 using Shared.Helpers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Timer = System.Timers.Timer;
+using Data.Models.Status;
 
 namespace Relay
 {
@@ -17,19 +20,14 @@ namespace Relay
     {
         #region Constants
 
-        // private const int HeartbeatIntervalSeconds = 3;
-        // private const int HeartbeatStaleSeconds = 5;
-
-        private const int HeartbeatIntervalSeconds = 7;
-        private const int HeartbeatStaleSeconds = 21;
-        private const long LockValue = 0x7E1A7L;
+        private const int HeartbeatIntervalSeconds = 10;
+        private const int HeartbeatStaleSeconds = 1;
 
         #endregion
 
         #region Fields
 
         private NpgsqlConnection? _dbConnection;
-        private readonly SemaphoreSlim _dbConnectionLock = new(1, 1);
         private IConnection? _rabbitConnection;
         private IChannel? _rabbitChannel;
 
@@ -37,18 +35,17 @@ namespace Relay
         private readonly IConfiguration _configuration;
         private readonly ILogger<Worker> _logger;
 
-        private readonly Dictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
-        private readonly HashSet<Guid> _pendingTasks;
-
+        private readonly ConcurrentDictionary<ulong, (IWorkItem item, long publishedAt)> _unAckedTasks;
 
         private readonly Timer _outBoxTimer;
         private readonly Timer _staleTimer;
-        private readonly Timer _heartbeatPollTimer;
-        //private readonly Timer _heartbeatUpdateTimer;
+        private readonly Timer _pollTimer;
 
         private bool _processingOutbox;
         private bool _processingStale;
         private bool _isLeader;
+        private long _myToken;
+        private CancellationTokenSource? _leaderLoopCts;
 
         #endregion
 
@@ -68,30 +65,23 @@ namespace Relay
 
             _processingOutbox = false;
             _processingStale = false;
-            _isLeader = false;
 
             _outBoxTimer = new Timer(5000);
             _outBoxTimer.AutoReset = true;
             _outBoxTimer.Enabled = false;
-            _outBoxTimer.Elapsed += async (_, _) => await TryProcessOutboxQueue();
+            _outBoxTimer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
 
             _staleTimer = new Timer(10000);
             _staleTimer.AutoReset = true;
             _staleTimer.Enabled = false;
-            _staleTimer.Elapsed += async (_, _) => await TryProcessStaleTasks();
+            _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
 
-            _heartbeatPollTimer = new Timer(HeartbeatStaleSeconds * 1000);
-            _heartbeatPollTimer.AutoReset = true;
-            _heartbeatPollTimer.Enabled = false;
-            _heartbeatPollTimer.Elapsed += async (_, _) => await PollHeartbeat();
+            _pollTimer = new Timer(HeartbeatIntervalSeconds * 1000);
+            _pollTimer.AutoReset = true;
+            _pollTimer.Enabled = true;
+            _pollTimer.Elapsed += async (_, _) => await TryClaimLeadership();
 
-            // _heartbeatUpdateTimer = new Timer(3000);
-            // _heartbeatUpdateTimer.AutoReset = true;
-            // _heartbeatUpdateTimer.Enabled = false;
-            // _heartbeatUpdateTimer.Elapsed += async (_, _) => await WriteHeartbeat();
-
-            _unAckedTasks = new Dictionary<ulong, (IWorkItem, long)>();
-            _pendingTasks = new HashSet<Guid>();
+            _unAckedTasks = new ConcurrentDictionary<ulong, (IWorkItem, long)>();
         }
 
         #endregion
@@ -101,232 +91,255 @@ namespace Relay
         /// <inheritdoc />
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-             var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
-            
+            var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
             _rabbitConnection = await factory.CreateConnectionAsync(stoppingToken);
-            
-            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
-            await _dbConnection.OpenAsync(stoppingToken);
+
+            await SeedLeaderRow(stoppingToken);
+            await TryClaimLeadership();
 
             try
             {
-                const string seedSql = "INSERT INTO \"Leader\" (\"Id\", \"PID\", \"LastSeenAt\") VALUES (1, 0, 'epoch'::timestamptz) ON CONFLICT (\"Id\") DO NOTHING";
-                await using var cmd = new NpgsqlCommand(seedSql, _dbConnection);
-                await cmd.ExecuteNonQueryAsync(stoppingToken);
-            } catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-                //Swallow any exceptions thrown.
+                await Task.Delay(Timeout.Infinite, stoppingToken);
             }
-
-            var lockAquired = await TryAquireLock();
-            if (lockAquired)
+            catch (OperationCanceledException) { }
+            
+            if (_isLeader)
             {
-                _logger.LogInformation("Acquired advisory lock on startup, assuming leader role");
-                await OnAssignedLeader();
-            } else
-            {
-                _logger.LogInformation("Advisory lock already held, starting as follower");
-                _heartbeatPollTimer.Enabled = true;
+                await OnDemotedToFollower();
             }
         }
 
+        /// <summary>
+        /// Host shutdown hook. Demotes eagerly so the leader heartbeat loop's
+        /// <c>while (_isLeader)</c> condition flips before <see cref="BackgroundService.StopAsync"/>
+        /// cancels <c>stoppingToken</c>. Without this, an <see cref="ExecuteAsync"/> that's
+        /// stuck inside <see cref="OnAssignedLeader"/>'s loop never reaches the cancellation
+        /// catch and gets SIGKILLed when the Docker grace period expires.
+        /// </summary>
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Stop signal received, beginning graceful shutdown");
+            if (_isLeader)
+            {
+                await OnDemotedToFollower();
+            }
+            await base.StopAsync(cancellationToken);
+        }
 
         /// <summary>
-        /// Challenger-side periodic check. Reads the leader heartbeat row and, if it is stale,
-        /// terminates the dead leader's backend session and attempts to acquire the advisory lock
-        /// to take over leadership. Runs on the same physical session used for LISTEN and the lock,
-        /// so any success here is bound to this connection's lifetime.
+        /// Idempotently seeds the singleton Leader row with <c>Id=1</c>, <c>Token=0</c>
+        /// and an epoch <c>LastSeenAt</c> so the first claim attempt has something to match.
         /// </summary>
-        /// <returns>A task that completes once the heartbeat check (and any takeover attempt) finishes.</returns>
-        private async Task PollHeartbeat()
+        private async Task SeedLeaderRow(CancellationToken cancellationToken)
         {
+            const string sql = "INSERT INTO \"Leader\" (\"Id\", \"Token\", \"LastSeenAt\") VALUES (1, 0, 'epoch'::timestamptz) ON CONFLICT (\"Id\") DO NOTHING";
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             try
             {
-                _logger.LogInformation("Polling leader heartbeat");
-
-                var lockAquired = await TryAquireLock();
-                if (lockAquired)
-                {
-                    _logger.LogInformation("Acquired advisory lock without eviction, promoting to leader");
-                    await OnAssignedLeader();
-                    return;
-                }
-
-                const string evictSql = @"
-                    WITH stale AS (
-                        SELECT ""PID"" FROM ""Leader""
-                        WHERE ""Id"" = 1
-                          AND ""PID"" <> 0
-                          AND clock_timestamp() - ""LastSeenAt"" > make_interval(secs => @threshold)
-                    )
-                    SELECT pg_terminate_backend(""PID"") FROM stale";
-
-                int evicted;
-                await using (var evict = new NpgsqlCommand(evictSql, _dbConnection))
-                {
-                    evict.Parameters.AddWithValue("threshold", (double)HeartbeatStaleSeconds);
-                    evicted = await evict.ExecuteNonQueryAsync();
-                }
-
-                if (evicted > 0)
-                {
-                    _logger.LogWarning("Detected stale leader, terminated {Count} backend(s)", evicted);
-                }
-
-                lockAquired = await TryAquireLock();
-                if (lockAquired)
-                {
-                    _logger.LogInformation("Acquired advisory lock after evicting stale leader, promoting to leader");
-                    await OnAssignedLeader();
-                }
+                await context.Database.ExecuteSqlRawAsync(sql, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Heartbeat poll failed");
+                _logger.LogError(ex, "Failed to seed Leader row");
             }
         }
 
         /// <summary>
-        /// Leader-side heartbeat write. Stamps the singleton Leader row with the current
-        /// clock and this session's backend PID so followers can detect liveness and know
-        /// which backend to terminate if the leader goes stale.
+        /// Leader-side heartbeat write. Refreshes <c>LastSeenAt</c> on the singleton
+        /// Leader row, scoped by <c>Token = _myToken</c> so a deposed leader's heartbeat
+        /// hits 0 rows and triggers self-demotion.
         /// </summary>
         /// <returns>A task that completes once the update has returned.</returns>
         private async Task WriteHeartbeat()
         {
-            await _dbConnectionLock.WaitAsync();
-            try
-            {
-                const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp(), \"PID\" = pg_backend_pid() WHERE \"Id\" = 1";
-                await using var cmd = new NpgsqlCommand(sql, _dbConnection);
-
-                try
-                {
-                    await cmd.ExecuteNonQueryAsync();
-                    _logger.LogInformation("Wrote leader heartbeat");
-                }
-                catch
-                {
-                    if (_dbConnection?.State != System.Data.ConnectionState.Open)
-                    {
-                        await OnDemotedToFollower();
-                    }
-                }
-            }
-            finally
-            {
-                _dbConnectionLock.Release();
-            }
-        }
-
-        /// <summary>
-        /// Attempts to acquire the session-level Postgres advisory lock identified by
-        /// <see cref="LockValue"/>. Non-blocking: returns immediately with the lock either
-        /// acquired or not. The lock is bound to the lifetime of <see cref="_dbConnection"/>
-        /// and is released automatically if that session ends for any reason (clean dispose,
-        /// pg_terminate_backend, dropped TCP connection). Sets <see cref="_lockAquired"/> to
-        /// the boolean result so the main loop can branch into leader or challenger behaviour.
-        /// </summary>
-        /// <returns>A task that completes once the acquisition attempt has returned.</returns>
-        private async Task<bool> TryAquireLock()
-        {
-            await using var cmd = new NpgsqlCommand("SELECT pg_try_advisory_lock(@key)", _dbConnection);
-            cmd.Parameters.AddWithValue("key", LockValue);
-            return (bool)(await cmd.ExecuteScalarAsync())!;
-        }
-
-
-        /// <summary>
-        /// Explicitly releases the advisory lock identified by <see cref="LockValue"/> on
-        /// <see cref="_dbConnection"/>. Used for graceful step-down so another replica can
-        /// take over without waiting for TCP keepalives or pg_terminate_backend. Note that
-        /// session death (clean shutdown, killed backend, dropped connection) already
-        /// releases the lock automatically, so this is only needed when the process intends
-        /// to keep its session alive but stop being the leader.
-        /// </summary>
-        /// <returns>A task that completes once the unlock statement has returned.</returns>
-        private async Task TryReleaseLock()
-        {
-            await using var cmd = new NpgsqlCommand("SELECT pg_advisory_unlock(@key)", _dbConnection);
-            cmd.Parameters.AddWithValue("key", LockValue);
-
-            await OnDemotedToFollower();
-        }
-
-        /// <summary>
-        /// Leader entry-point. Subscribes to the task_channel LISTEN, kicks off an initial
-        /// outbox drain, enables the leader-only timers (outbox, stale reaper), then enters
-        /// a loop that writes the heartbeat and waits on notifications. Any failure on the
-        /// session is treated as loss of leadership: the lock is released and the loop exits.
-        /// </summary>
-        /// <returns>A task that completes when leadership is relinquished or the host stops.</returns>
-        private async Task OnAssignedLeader()
-        {
-            _heartbeatPollTimer.Enabled = false;
-
-            if (_dbConnection == null)
+            if (!_isLeader)
             {
                 return;
             }
 
-            _logger.LogInformation("Entering leader role");
-            // _dbConnection.Notification += OnNotify;
-            // await using (var cmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
-            // {
-            //     try
-            //     {
-            //         await cmd.ExecuteNonQueryAsync();
-            //     } catch (Exception ex)
-            //     {
-            //         _logger.LogError(ex, "Failed to create listener for task_channel");
-            //     }
-            // }
-
-            await OnProcessOutboxQueue();
-            _staleTimer.Enabled = true;
-            _outBoxTimer.Enabled = true;
-            _isLeader = true;
-
-            while (_isLeader)
+            const string sql = "UPDATE \"Leader\" SET \"LastSeenAt\" = clock_timestamp() WHERE \"Id\" = 1 AND \"Token\" = {0}";
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            try
             {
-                try
+                var rows = await context.Database.ExecuteSqlRawAsync(sql, _myToken);
+                if (rows == 0)
                 {
-                    await WriteHeartbeat();
-                    await Task.Delay(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
-                    //await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds));
-                } catch
-                {
-                    await TryReleaseLock();
-                    break;
+                    _logger.LogWarning("Heartbeat affected 0 rows, leadership lost (myToken={MyToken})", _myToken);
+                    await OnDemotedToFollower();
+                    return;
                 }
+                _logger.LogInformation("Heartbeat OK, token={Token}", _myToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write leader heartbeat (token={Token})", _myToken);
             }
         }
 
         /// <summary>
-        /// Transition hook invoked when the leader detects it has lost its session (e.g. the
-        /// backend was terminated by a challenger via <c>pg_terminate_backend</c>). Disables
-        /// leader-only timers, disposes the broken connection, opens a fresh one, and rejoins
-        /// the cluster as a follower.
+        /// Follower-side election attempt. Atomically bumps the fencing token and
+        /// refreshes <c>LastSeenAt</c> iff the current leader has gone stale
+        /// (<c>LastSeenAt &lt; now() - HeartbeatStaleSeconds</c>). On success transitions
+        /// this replica into the leader role.
         /// </summary>
-        /// <returns>A task that completes once the worker has re-entered the follower state.</returns>
-        private async Task OnDemotedToFollower()
+        /// <returns>The new fencing token if leadership was claimed, null otherwise.</returns>
+        private async Task<long?> TryClaimLeadership()
         {
-            _logger.LogWarning("Demoting to follower, leader session lost");
-            
-            _outBoxTimer.Enabled = false;
-            _staleTimer.Enabled = false;
-            _isLeader = false;
-
-            if (_dbConnection != null)
+            if (_isLeader)
             {
-                await _dbConnection.DisposeAsync();
+                return null;
             }
+
+            const string sql = @"
+                UPDATE ""Leader""
+                SET ""Token"" = ""Token"" + 1, ""LastSeenAt"" = clock_timestamp()
+                WHERE ""Id"" = 1 AND ""LastSeenAt"" < now() - make_interval(secs => @stale)
+                RETURNING ""Token""";
+
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
+            try
+            {
+                var conn = (NpgsqlConnection)context.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open)
+                {
+                    await conn.OpenAsync();
+                }
+
+                await using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("stale", (double)HeartbeatStaleSeconds);
+
+                var result = await cmd.ExecuteScalarAsync();
+                if (result is null or DBNull)
+                {
+                    _logger.LogInformation("Leadership claim declined - current leader still alive");
+                    return null;
+                }
+
+                var token = (long)result;
+                _logger.LogInformation("Leadership claim won - current leader was stale, new token={Token}", token);
+                await OnAssignedLeader(token);
+                return token;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to attempt leadership claim");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Transitions this replica into the leader role: caches the fencing token,
+        /// disables the follower poll, enables leader-side timers, opens a dedicated
+        /// Postgres session for <c>LISTEN task_channel</c>, drains the outbox, and
+        /// runs the wait/heartbeat loop until demotion disposes the connection.
+        /// </summary>
+        private async Task OnAssignedLeader(long token)
+        {
+            _myToken = token;
+            _isLeader = true;
+            _leaderLoopCts = new CancellationTokenSource();
+
+            _pollTimer.Enabled = false;
+            _outBoxTimer.Enabled = true;
+            _staleTimer.Enabled = true;
+
+            _logger.LogInformation("Promoted to LEADER (token={Token}) - enabling outbox/stale timers, disabling poll", token);
 
             _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
             await _dbConnection.OpenAsync();
-            _heartbeatPollTimer.Enabled = true;
-            _logger.LogInformation("Entered follower role");
+            _dbConnection.Notification += OnNotify;
+
+            await using (var listenCmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
+            {
+                try
+                {
+                    await listenCmd.ExecuteNonQueryAsync();
+                    _logger.LogInformation("Subscribed to task_channel notifications");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to create listener for task_channel");
+                }
+            }
+
+            await OnProcessOutboxQueue();
+
+            _logger.LogInformation("Entering leader heartbeat loop (interval={Interval}s)", HeartbeatIntervalSeconds);
+            while (_isLeader)
+            {
+                try
+                {
+                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), _leaderLoopCts.Token);
+                    await WriteHeartbeat();
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Leader loop iteration failed (token={Token})", _myToken);
+                    break;
+                }
+            }
+            _logger.LogInformation("Exited leader heartbeat loop");
+        }
+
+        /// <summary>
+        /// Transitions this replica back to the follower role: clears the cached token,
+        /// disables leader-side timers, disposes the dedicated leader connection (which
+        /// also releases the LISTEN), and re-enables the follower poll. If our token is
+        /// still the current one in the DB, backdate <c>LastSeenAt</c> so the next
+        /// candidate can claim immediately instead of waiting out the stale interval.
+        /// </summary>
+        private async Task OnDemotedToFollower()
+        {
+            var prevToken = _myToken;
+            _logger.LogWarning("Demoting from LEADER role (was token={Token})", prevToken);
+
+            _isLeader = false;
+            _myToken = 0;
+            _leaderLoopCts?.Cancel();
+
+            _outBoxTimer.Enabled = false;
+            _staleTimer.Enabled = false;
+            _pollTimer.Enabled = true;
+
+            await using (var context = await _dbContextFactory.CreateDbContextAsync())
+            {
+                try
+                {
+                    var rows = await context.Database.ExecuteSqlRawAsync(
+                        "UPDATE \"Leader\" SET \"LastSeenAt\" = 'epoch'::timestamptz WHERE \"Id\" = 1 AND \"Token\" = {0}",
+                        prevToken);
+                    if (rows == 1)
+                    {
+                        _logger.LogInformation("Relinquished leadership cleanly (token={Token}) - LastSeenAt backdated", prevToken);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Skipped LastSeenAt clear, token={Token} no longer current", prevToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to clear LastSeenAt on demotion (token={Token})", prevToken);
+                }
+            }
+
+            if (_dbConnection is not null)
+            {
+                _dbConnection.Notification -= OnNotify;
+                await _dbConnection.DisposeAsync();
+                _dbConnection = null;
+                _logger.LogInformation("Disposed leader DB session and unsubscribed from task_channel");
+            }
+
+            _leaderLoopCts?.Dispose();
+            _leaderLoopCts = null;
+
+            _logger.LogWarning("Now FOLLOWER - poll timer re-enabled (interval={Interval}s)", HeartbeatIntervalSeconds);
         }
 
         /// <summary>
@@ -335,7 +348,7 @@ namespace Relay
         /// <param name="obj">The object data.</param>
         /// <param name="args">The event arguments.</param>
         private async void OnNotify(object obj, NpgsqlNotificationEventArgs args)
-        {   
+        {
             await OnProcessOutboxQueue();
         }
 
@@ -348,85 +361,89 @@ namespace Relay
         /// message properties.</param>
         private async Task OnAckReturn(object sender, BasicAckEventArgs args)
         {
-            using var deliveryScope = _logger.BeginScope(new Dictionary<string, object>
+            var drained = DrainConfirmedTags(args.DeliveryTag, args.Multiple);
+            if (drained.Count == 0)
             {
-                ["DeliveryTag"] = args.DeliveryTag
-            });
-
-            var removed = _unAckedTasks.Remove(args.DeliveryTag, out var entry);
-            if (!removed)
-            {
-                //Acking a task that has already either been re sent or marked as acked, either way ignore and keep going.
-                //_logger.LogWarning("Ack received for task that has already been resent or marked as acked");
                 await Task.Yield();
                 return;
             }
 
-            var (task, publishedAt) = entry;
-            AppMetrics.Relay.OutboxPublishAckSeconds.Observe(Stopwatch.GetElapsedTime(publishedAt).TotalSeconds);
-
-            using var taskScope = _logger.BeginScope(new Dictionary<string, object>
-            {
-                [CorrelationConstants.LogScopeKey] = task.CorrelationId,
-                ["TaskId"] = task.TaskId
-            });
-
             await using var context = await _dbContextFactory.CreateDbContextAsync();
-            try
+            foreach (var (_, entry) in drained)
             {
-                await context.Database.BeginTransactionAsync();
-                await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
-                await context.Database.CommitTransactionAsync();
-                _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Task received by broker",
-                    task.CorrelationId, task.TaskId);
-            } catch (Exception ex)
-            {
-                _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to mark task as published",
-                    task.CorrelationId, task.TaskId);
-            } finally
-            {
-                _pendingTasks.Remove(task.TaskId);
-            }
-        }
+                var (task, publishedAt) = entry;
+                AppMetrics.Relay.OutboxPublishAckSeconds.Observe(Stopwatch.GetElapsedTime(publishedAt).TotalSeconds);
 
-        /// <summary>
-        /// Timer-driven wrapper around <see cref="OnProcessOutboxQueue"/>. Catches any failure
-        /// and, if the leader's DB session is no longer open, treats it as lost leadership and
-        /// demotes this replica to a follower.
-        /// </summary>
-        /// <returns>A task that completes once the outbox attempt (and any demotion) has finished.</returns>
-        private async Task TryProcessOutboxQueue()
-        {
-            try
-            {
-                await OnProcessOutboxQueue();
-            } catch
-            {
-                if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                using var taskScope = _logger.BeginScope(new Dictionary<string, object>
                 {
-                    await OnDemotedToFollower();
+                    [CorrelationConstants.LogScopeKey] = task.CorrelationId,
+                    ["TaskId"] = task.TaskId
+                });
+
+                try
+                {
+                    await context.Database.BeginTransactionAsync();
+                    await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"PublishedAt\" = clock_timestamp() WHERE \"TaskId\" = {0}", task.TaskId);
+                    await context.Database.CommitTransactionAsync();
+                    _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Task received by broker",
+                        task.CorrelationId, task.TaskId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Failed to mark task as published",
+                        task.CorrelationId, task.TaskId);
                 }
             }
         }
 
         /// <summary>
-        /// Timer-driven wrapper around the stale-task sweep. Catches any failure and demotes
-        /// this replica to a follower, on the assumption that a failure here means the leader
-        /// session is no longer healthy.
+        /// Handles a broker nack for a previously published outbox message. Drops the
+        /// in-memory tracking so the slot doesn't leak; the row's <c>PublishedAt</c> stays
+        /// null so the stale reaper will eventually re-dispatch it.
         /// </summary>
-        /// <returns>A task that completes once the stale sweep (and any demotion) has finished.</returns>
-        private async Task TryProcessStaleTasks()
+        private async Task OnNackReturn(object sender, BasicNackEventArgs args)
         {
-            try
+            var drained = DrainConfirmedTags(args.DeliveryTag, args.Multiple);
+            if (drained.Count == 0)
             {
-                await OnProcessStaleTasks();
-            } catch
+                await Task.Yield();
+                return;
+            }
+
+            foreach (var (_, entry) in drained)
             {
-                if (_dbConnection?.State != System.Data.ConnectionState.Open)
+                AppMetrics.Relay.OutboxNacks.Inc();
+                var (task, _) = entry;
+                _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Broker nacked publish - stale reaper will retry",
+                    task.CorrelationId, task.TaskId);
+            }
+            await Task.Yield();
+        }
+
+        /// <summary>
+        /// Removes and returns the set of un-acked entries covered by a broker confirm.
+        /// When <paramref name="multiple"/> is true the broker is confirming every delivery
+        /// tag up to and including <paramref name="deliveryTag"/> in a single frame; otherwise
+        /// only the exact tag is drained.
+        /// </summary>
+        private List<(ulong tag, (IWorkItem item, long publishedAt) entry)> DrainConfirmedTags(ulong deliveryTag, bool multiple)
+        {
+            var drained = new List<(ulong, (IWorkItem, long))>();
+            if (multiple)
+            {
+                foreach (var tag in _unAckedTasks.Keys.Where(t => t <= deliveryTag).ToList())
                 {
-                    await OnDemotedToFollower();
+                    if (_unAckedTasks.TryRemove(tag, out var entry))
+                    {
+                        drained.Add((tag, entry));
+                    }
                 }
             }
+            else if (_unAckedTasks.TryRemove(deliveryTag, out var entry))
+            {
+                drained.Add((deliveryTag, entry));
+            }
+            return drained;
         }
 
         /// <summary>
@@ -435,34 +452,24 @@ namespace Relay
         /// <returns>A task representing the asynchronous operation.</returns>
         private async Task OnProcessOutboxQueue()
         {
-            if (_processingOutbox || _dbConnection == null)
+            if (_processingOutbox)
             {
                 return;
             }
 
             _processingOutbox = true;
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             try
             {
-                long depth;
-                await using (var countCmd = new NpgsqlCommand("SELECT COUNT(*) FROM outbox", _dbConnection))
-                {
-                    depth = (long)(await countCmd.ExecuteScalarAsync())!;
-                }
-                AppMetrics.Relay.OutboxDepth.Set(depth);
-
-                DateTime? oldest;
-                await using (var oldestCmd = new NpgsqlCommand("SELECT MIN(\"CreatedAt\") FROM outbox", _dbConnection))
-                {
-                    var result = await oldestCmd.ExecuteScalarAsync();
-                    oldest = result is null or DBNull ? null : (DateTime?)result;
-                }
+                AppMetrics.Relay.OutboxDepth.Set(await context.Outbox.CountAsync());
+                var oldest = await context.Outbox.MinAsync(t => (DateTime?)t.CreatedAt);
                 AppMetrics.Relay.OutboxOldestUnpublishedSeconds.Set(
                     oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not read outbox metrics");
+                _logger.LogDebug(ex, "Could not read outbox metrics");
             }
 
             int page = 1;
@@ -470,35 +477,36 @@ namespace Relay
 
             while (true)
             {
-                List<OutboxWorkItem> tasks = new();
+                List<OutboxWorkItem> tasks;
+                bool tokenLost = false;
 
                 try
                 {
-                    await using var readCmd = new NpgsqlCommand("SELECT * FROM outbox ORDER BY \"Id\" LIMIT @limit",_dbConnection);
-                    readCmd.Parameters.AddWithValue("limit", pageSize * page);
-                    await using var reader = await readCmd.ExecuteReaderAsync();
-                    while (await reader.ReadAsync())
+                    await using var fetchTx = await context.Database.BeginTransactionAsync();
+                    if (!await TryLockLeaderRowAsync(context, fetchTx))
                     {
-                        tasks.Add(new OutboxWorkItem
-                        {
-                            Id = reader.GetInt64(reader.GetOrdinal("Id")),
-                            TaskId = reader.GetGuid(reader.GetOrdinal("TaskId")),
-                            CorrelationId = reader.GetGuid(reader.GetOrdinal("CorrelationId")),
-                            IdempotencyId = reader.GetString(reader.GetOrdinal("IdempotencyId")),
-                            Url = reader.GetString(reader.GetOrdinal("Url")),
-                            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
-                            SentAt = reader.IsDBNull(reader.GetOrdinal("SentAt")) ? null : reader.GetDateTime(reader.GetOrdinal("SentAt")),
-                            PublishedAt = reader.IsDBNull(reader.GetOrdinal("PublishedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("PublishedAt")),
-                            NextAttemptAt = reader.IsDBNull(reader.GetOrdinal("NextAttemptAt")) ? null : reader.GetDateTime(reader.GetOrdinal("NextAttemptAt")),
-                            Attempt = reader.GetInt32(reader.GetOrdinal("Attempt"))
-                        });
+                        tokenLost = true;
+                        tasks = new List<OutboxWorkItem>();
+                    }
+                    else
+                    {
+                        tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                        await fetchTx.CommitAsync();
                     }
                 }
                 catch (Exception ex)
                 {
                     //Database not ready yet.
-                    _logger.LogError(ex, "Error trying to read outbox, skipping process");
+                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.Outbox));
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _logger.LogWarning("Outbox processing aborted - token {Token} no longer current", _myToken);
+                    _processingOutbox = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 if (tasks.Count == 0)
@@ -509,21 +517,31 @@ namespace Relay
                 try
                 {
                     var ids = await SendMessagesToBroker(tasks);
-                    await using var tx = await _dbConnection.BeginTransactionAsync();
+                    await context.Database.BeginTransactionAsync();
                     foreach (var id in ids)
                     {
-                        await using var updateCmd = new NpgsqlCommand(
-                            "UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = @taskId",
-                            _dbConnection, tx);
-                        updateCmd.Parameters.AddWithValue("taskId", id);
-                        await updateCmd.ExecuteNonQueryAsync();
+                        var rows = await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"SentByToken\" = {0} WHERE \"SentByToken\" <= {0} AND \"TaskId\" = {1}", _myToken, id);
+                        if (rows == 0)
+                        {
+                            AppMetrics.Relay.StaleTokenTaskUpdates.Inc();
+                            _logger.LogWarning("Outbox task update rejected - token {Token} superseded (TaskId={TaskId})", _myToken, id);
+                            tokenLost = true;
+                            break;
+                        }
                     }
-                    await tx.CommitAsync();
+                    await context.Database.CommitTransactionAsync();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Unexpected error occurred while sending outbox tasks");
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _processingOutbox = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 page++;
@@ -538,33 +556,24 @@ namespace Relay
         /// </summary>
         private async Task OnProcessStaleTasks()
         {
-            if (_processingStale || _dbConnection == null)
+            if (_processingStale)
             {
                 return;
             }
 
             _processingStale = true;
+            await using var context = await _dbContextFactory.CreateDbContextAsync();
 
             try
             {
-                long depth;
-                await using (var countCmd = new NpgsqlCommand("SELECT COUNT(*) FROM staletasks", _dbConnection))
-                {
-                    depth = (long)(await countCmd.ExecuteScalarAsync())!;
-                }
-                AppMetrics.Relay.StaleDepth.Set(depth);
-
-                DateTime? oldest;
-                await using (var oldestCmd = new NpgsqlCommand("SELECT MIN(\"SentAt\") FROM staletasks", _dbConnection))
-                {
-                    var result = await oldestCmd.ExecuteScalarAsync();
-                    oldest = result is null or DBNull ? null : (DateTime?)result;
-                }
-                AppMetrics.Relay.StaleOldestSeconds.Set(oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
+                AppMetrics.Relay.StaleDepth.Set(await context.StaleTasks.CountAsync());
+                var oldest = await context.StaleTasks.MinAsync(t => t.SentAt);
+                AppMetrics.Relay.StaleOldestSeconds.Set(
+                    oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not read stale-task metrics");
+                _logger.LogDebug(ex, "Could not read stale-task metrics");
             }
 
             int page = 1;
@@ -572,35 +581,36 @@ namespace Relay
 
             while (true)
             {
-                List<StaleWorkItem> staleTasks = new();
+                List<StaleWorkItem> staleTasks;
+                bool tokenLost = false;
 
                 try
                 {
-                    await using var readCmd = new NpgsqlCommand("SELECT * FROM staletasks ORDER BY \"Id\" LIMIT @limit",_dbConnection);
-                    readCmd.Parameters.AddWithValue("limit", pageSize * page);
-                    await using var reader = await readCmd.ExecuteReaderAsync();
-                    while (await reader.ReadAsync())
+                    await using var fetchTx = await context.Database.BeginTransactionAsync();
+                    if (!await TryLockLeaderRowAsync(context, fetchTx))
                     {
-                        staleTasks.Add(new StaleWorkItem
-                        {
-                            Id = reader.GetInt64(reader.GetOrdinal("Id")),
-                            TaskId = reader.GetGuid(reader.GetOrdinal("TaskId")),
-                            CorrelationId = reader.GetGuid(reader.GetOrdinal("CorrelationId")),
-                            IdempotencyId = reader.GetString(reader.GetOrdinal("IdempotencyId")),
-                            Url = reader.GetString(reader.GetOrdinal("Url")),
-                            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
-                            SentAt = reader.IsDBNull(reader.GetOrdinal("SentAt")) ? null : reader.GetDateTime(reader.GetOrdinal("SentAt")),
-                            PublishedAt = reader.IsDBNull(reader.GetOrdinal("PublishedAt")) ? null : reader.GetDateTime(reader.GetOrdinal("PublishedAt")),
-                            NextAttemptAt = reader.IsDBNull(reader.GetOrdinal("NextAttemptAt")) ? null : reader.GetDateTime(reader.GetOrdinal("NextAttemptAt")),
-                            Attempt = reader.GetInt32(reader.GetOrdinal("Attempt"))
-                        });
+                        tokenLost = true;
+                        staleTasks = new List<StaleWorkItem>();
+                    }
+                    else
+                    {
+                        staleTasks = await context.StaleTasks.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                        await fetchTx.CommitAsync();
                     }
                 }
                 catch (Exception ex)
                 {
                     //Database not ready yet.
-                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", "staletasks");
+                    _logger.LogError(ex, "Error trying to read {QueueName}, skipping process", nameof(context.StaleTasks));
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _logger.LogWarning("Stale processing aborted - token {Token} no longer current", _myToken);
+                    _processingStale = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 if (staleTasks.Count == 0)
@@ -611,34 +621,48 @@ namespace Relay
                 try
                 {
                     var ids = await SendMessagesToBroker(staleTasks);
-                    await using var tx = await _dbConnection.BeginTransactionAsync();
-                    foreach (var staleTask in staleTasks.Where(t => ids.Contains(t.TaskId)))
+                    await context.Database.BeginTransactionAsync();
+                    foreach (var id in ids)
                     {
-                        await using (var updateCmd = new NpgsqlCommand(
-                            "UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp() WHERE \"TaskId\" = @taskId",
-                            _dbConnection, tx))
+                        var rows = await context.Database.ExecuteSqlRawAsync("UPDATE \"Tasks\" SET \"SentAt\" = clock_timestamp(), \"SentByToken\" = {0} WHERE \"SentByToken\" <= {0} AND \"TaskId\" = {1}", _myToken, id);
+                        if (rows == 0)
                         {
-                            updateCmd.Parameters.AddWithValue("taskId", staleTask.TaskId);
-                            await updateCmd.ExecuteNonQueryAsync();
+                            AppMetrics.Relay.StaleTokenTaskUpdates.Inc();
+                            _logger.LogWarning("Stale task update rejected - token {Token} superseded (TaskId={TaskId})", _myToken, id);
+                            tokenLost = true;
+                            break;
+                        }
+                        //Raising conflict for stale task retry.
+
+                        var job = await context.Tasks.FirstOrDefaultAsync(t => t.TaskId == id);
+                        if (job == null)
+                        {
+                            _logger.LogError("Failed to resubmit task {id}, task doesn't exist", id);
+                            continue;
                         }
 
-                        //Raising conflict for stale task retry.
-                        await using var insertCmd = new NpgsqlCommand(
-                            "INSERT INTO \"Conflicts\" (\"TaskId\", \"CorrelationId\", \"IdempotencyId\", \"Reason\", \"Attempt\") VALUES (@taskId, @correlationId, @idempotencyId, @reason, @attempt)",
-                            _dbConnection, tx);
-                        insertCmd.Parameters.AddWithValue("taskId", staleTask.TaskId);
-                        insertCmd.Parameters.AddWithValue("correlationId", staleTask.CorrelationId);
-                        insertCmd.Parameters.AddWithValue("idempotencyId", staleTask.IdempotencyId);
-                        insertCmd.Parameters.AddWithValue("reason", "Stale reaper picked up and resubmitted task.");
-                        insertCmd.Parameters.AddWithValue("attempt", staleTask.Attempt);
-                        await insertCmd.ExecuteNonQueryAsync();
+                        context.Add(new Conflict()
+                        {
+                            TaskId = job.TaskId,
+                            CorrelationId = job.CorrelationId,
+                            IdempotencyId = job.IdempotencyId,
+                            Reason = "Stale reaper picked up and resubmitted task.",
+                            Attempt = job.Attempt
+                        });
                     }
-                    await tx.CommitAsync();
+                    await context.Database.CommitTransactionAsync();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Unexpected error occurred while sending stale tasks");
                     break;
+                }
+
+                if (tokenLost)
+                {
+                    _processingStale = false;
+                    await OnDemotedToFollower();
+                    return;
                 }
 
                 page++;
@@ -647,6 +671,25 @@ namespace Relay
             _processingStale = false;
         }
         
+        /// <summary>
+        /// Acquires a row lock on the singleton Leader row scoped to <see cref="_myToken"/>.
+        /// Returns true if we still hold leadership, false if our token has been superseded.
+        /// The caller releases the lock by committing or rolling back <paramref name="transaction"/>.
+        /// While the lock is held, concurrent <c>TryClaimLeadership</c> attempts block on the
+        /// row, preventing a new leader from being elected during the fetch.
+        /// </summary>
+        private async Task<bool> TryLockLeaderRowAsync(ApplicationDbContext context, IDbContextTransaction transaction)
+        {
+            var conn = (NpgsqlConnection)context.Database.GetDbConnection();
+            var tx = (NpgsqlTransaction)transaction.GetDbTransaction();
+            await using var cmd = new NpgsqlCommand(
+                "SELECT \"Token\" FROM \"Leader\" WHERE \"Id\" = 1 AND \"Token\" = @token FOR UPDATE",
+                conn, tx);
+            cmd.Parameters.AddWithValue("token", _myToken);
+            var result = await cmd.ExecuteScalarAsync();
+            return result is not null and not DBNull;
+        }
+
         /// <summary>
         /// Sends a batch of outbox work items to the RabbitMQ broker, ensuring the channel and queue are properly
         /// initialized.
@@ -675,18 +718,18 @@ namespace Relay
                 });
 
                 var deliveryTag = batchStartingNumber + (ulong)i;
-                _unAckedTasks.Add(deliveryTag, (workItem, Stopwatch.GetTimestamp()));
+                _unAckedTasks.TryAdd(deliveryTag, (workItem, Stopwatch.GetTimestamp()));
                 try
                 {
                     await _rabbitChannel.BasicPublishAsync(exchange: string.Empty, routingKey: "outbox",
                         body: JsonSerializer.SerializeToUtf8Bytes(message));
                     AppMetrics.Relay.OutboxPublishes.WithLabels("success").Inc();
-                    _logger.LogWarning("CorrelationId={CorrelationId} TaskId={TaskId} Published task to broker",
+                    _logger.LogDebug("CorrelationId={CorrelationId} TaskId={TaskId} Published task to broker",
                         workItem.CorrelationId, workItem.TaskId);
                 }
                 catch (Exception ex)
                 {
-                    _unAckedTasks.Remove(deliveryTag);
+                    _unAckedTasks.TryRemove(deliveryTag, out _);
                     AppMetrics.Relay.OutboxPublishes.WithLabels("fail").Inc();
                     _logger.LogError(ex, "CorrelationId={CorrelationId} TaskId={TaskId} Message failed to send across rabbit channel",
                         workItem.CorrelationId, workItem.TaskId);
@@ -712,8 +755,9 @@ namespace Relay
 
             if (_rabbitChannel == null || _rabbitChannel.IsClosed)
             {
-                _rabbitChannel = await _rabbitConnection.CreateChannelAsync(new CreateChannelOptions(true, true));
+                _rabbitChannel = await _rabbitConnection.CreateChannelAsync(new CreateChannelOptions(true, false));
                 _rabbitChannel.BasicAcksAsync += OnAckReturn;
+                _rabbitChannel.BasicNacksAsync += OnNackReturn;
 
                 await _rabbitChannel.QueueDeclareAsync(queue: "outbox",
                     durable: true, exclusive: false,

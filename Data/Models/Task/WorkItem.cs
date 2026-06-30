@@ -75,6 +75,13 @@ namespace Data.Models.Task
         /// </summary>
         public int Attempt { get; set; }
 
+        /// <summary>
+        /// Fencing token of the relay leader that most recently published this task.
+        /// 0 means the task has not been sent (real tokens start at 1).
+        /// </summary>
+        [Column(TypeName = "int8")]
+        public long SentByToken { get; set; }
+
         #endregion
 
         #region Constructor

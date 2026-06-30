@@ -610,3 +610,34 @@ Ok so there would be a table called leader or something with a single row, which
 - Yeah this pattern is terrible, all the methods require a semaphore around it, each poll heartbeat write, outbox poll stale tasks poll or acquire lock method are just gonna fight each other constantly for this semaphore
 - Going to reset which sucks because I put a lot of work into this. Think I'm just gonna go the fencing token route, that seems the most straightforward, I don't need seperate npsql connection objects to act as anything special, it doesn't produce a shit ton of bloat code as well
 - Because I'm a pig for the GitHub commit streaks, I'm gonna merge all of this into main, then create another branch where I reset it and start again to try and create fencing tokens 
+
+
+
+23/06/26
+- Changing the layout to use a fencing token in the leaderboard table, this will be used for all queries reads and writes, I'll need to have a way of keeping other nodes up to date or close to it with their tokens.
+- Shieet will need to bring the heartbeat back in, how else will other nodes detect that one has gone stale or died for that matter
+
+
+24/06/26
+- Ok I think I've got the new structure down, so the heartbeat logic will remain the same but this time there will be a fencing token in the leadership table, this token will be incremented each time the leader changes, the leader then will hold onto that token and use it for any subsequent requests, if the token doesn't match the request will be declined at the leader demoted back to a follower.
+
+25/06/26
+- I'm just gonna get claude to implement this, it's important that I still understand what's going in, but I don't need to write the code by hand
+- So leadership election is working quite well, need to do a full test give it a google.com endpoint to scrape and then kill a leader halfway through and make sure the outbox continues to flow
+- Just a quick summary on what has changed and why it changed: Ok so the heartbeat is conditional based on the token the leader will try to write the heartbeat row and if their token doesn't match the one in the row it will be demoted to a follower, the heart beat interval is 5 seconds, the last_seen_at is clock_timestamp() and now() so it's consistent across relays, at the moment there's no check on the outbox or stale task publish if the token is correct that's what I'm doing now. The issue with the advisory lock was in order to maintain the lock and use it as state for who the current leader is I had to maintain a _dbConnection at all times, this wouldn't work with the notify event polling as I had to call connection.wait to receive those events, it was also causing issues when a leader had to write a heartbeat and query the outbox at the same time because the connection would be locked. I thought about locking everything behind a semaphore but that defeats the whole purpose of the outbox pattern if I have to wait each time
+- had a goal of having a sub 5 second failover time, that might have worked with the previous advisory lock pattern but it won't work for this, so I'm relaxing that constraint to 15-20 seconds
+- Added token checking before the stale and outbox tasks batching
+- Running through claude suggested failure cases before I can move onto the next topic
+- Lease time out has been set to 15s and intervals 5s, I could probably tighten this but there's no real pressing need to. There's now clean shut down functionality where if the leader is told to shut down it will clean the last_seen_at column so that a follower can immediately pick up as leader on the next poll cycle. 
+- There is a check for the token in the same query as the outbox query using  "SELECT \"Token\" FROM \"Leader\" WHERE \"Id\" = 1 AND \"Token\" = @token FOR UPDATE" introduced to the FOR UPDATE in Postgres logic for locking a row, this is in the same transaction
+
+26/06/26
+- Going to add a published by token field that lives on the tasks object, it's going to default to a value of 0. The reason for this is because currently a zombie leader could poll the outbox view, publish and then pause before updating the tasks as sent, this would mean another leader would publish and update the tasks then when the old leader came back it would adjust the sentAt to the incorrect time, not critical but it's worth adding for cleanliness and too add a prometheus metric to track how often this is happening.
+
+30/06/26
+- Finished fencing token work
+- Added support for multiple acks on ack acknowledge
+- Going to start working on sharpening up the publisher confirms, there's a few edge cases like what happens when the process dies and there are still tasks sitting in the _unackedTasks list, what happens when a task isn't marked as published, I'm not 100% sure I need to double check
+- Need to address a race condition as well where the _unackedTasks can be added too and removed from on different threads
+- Decided to skip publisher confirms. My current implementation, I realised was providing nothing of value, publishedAt was not a column that was being read anywhere and besides the in memory dictionary of delivery tags was incredibly fragile and prone to not marking the tasks published at. That being said I could implement a way making the publishedAt column substantial. I could add a separate reaper that worked off a different timer and polled tasks that were sent but not published and retry those, this wouldn't be the most difficult thing to implement but it would introduce complexity that doesn't result in a substantial gain.
+- I'm going to keep the the in memory delivery tag map purely for the latency metric and nack metric

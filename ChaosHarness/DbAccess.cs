@@ -46,6 +46,15 @@ internal sealed class DbAccess
             Stuck: reader.GetInt64(2));
     }
 
+    public async Task<long> GetLeaderTokenAsync()
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT \"Token\" FROM \"Leader\" WHERE \"Id\" = 1", conn);
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null or DBNull ? 0L : (long)result;
+    }
+
     public async Task<long> CountDuplicateSuccessesAsync(IReadOnlyCollection<Guid> taskIds)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
