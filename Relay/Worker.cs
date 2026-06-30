@@ -244,6 +244,9 @@ namespace Relay
             _outBoxTimer.Enabled = true;
             _staleTimer.Enabled = true;
 
+            AppMetrics.Relay.IsLeader.Set(1);
+            AppMetrics.Relay.LeadershipPromotions.Inc();
+
             _logger.LogInformation("Promoted to LEADER (token={Token}) - enabling outbox/stale timers, disabling poll", token);
 
             _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
@@ -305,6 +308,8 @@ namespace Relay
             _outBoxTimer.Enabled = false;
             _staleTimer.Enabled = false;
             _pollTimer.Enabled = true;
+
+            AppMetrics.Relay.IsLeader.Set(0);
 
             await using (var context = await _dbContextFactory.CreateDbContextAsync())
             {

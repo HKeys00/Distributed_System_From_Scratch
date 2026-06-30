@@ -58,6 +58,14 @@ public static class AppMetrics
         public static readonly Counter OutboxNacks = Metrics.CreateCounter(
             "relay_outbox_nacks_total",
             "Number of outbox publishes rejected by the broker via basic.nack.");
+
+        public static readonly Gauge IsLeader = Metrics.CreateGauge(
+            "relay_is_leader",
+            "1 when this relay instance currently holds leadership, 0 otherwise. Sum across instances should equal 1.");
+
+        public static readonly Counter LeadershipPromotions = Metrics.CreateCounter(
+            "relay_leadership_promotions_total",
+            "Number of times this relay instance has been promoted to leader.");
     }
 
     public static class Worker
