@@ -66,6 +66,10 @@ public static class AppMetrics
         public static readonly Counter LeadershipPromotions = Metrics.CreateCounter(
             "relay_leadership_promotions_total",
             "Number of times this relay instance has been promoted to leader.");
+
+        public static readonly Gauge LeaderLeaseAgeSeconds = Metrics.CreateGauge(
+            "relay_leader_lease_age_seconds",
+            "Seconds since the current leader last wrote a heartbeat, observed by this replica on its last DB poll. Watch for values approaching the stale threshold.");
     }
 
     public static class Worker

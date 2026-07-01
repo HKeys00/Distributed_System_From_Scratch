@@ -146,14 +146,10 @@ services:
     build:
       context: .
       dockerfile: Worker_Node/Dockerfile
-    container_name: worker-node
     working_dir: /app
-    ports:
-      - "9103:9103"
+    expose:
+      - "9102"
     environment:
-      NODE_ID: A
-      DATA_DIR: /data
-      PEERS:
       ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
       Seq__ServerUrl: "http://seq:80"
     depends_on:
@@ -163,21 +159,8 @@ services:
         condition: service_healthy
       seq:
         condition: service_healthy
-
-  # dashboard:
-  #   build:
-  #     context: .
-  #     dockerfile: Dashboard/Dockerfile
-  #   container_name: dashboard
-  #   working_dir: /app
-  #   environment:
-  #     ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
-  #   depends_on:
-  #     postgres_db:
-  #       condition: service_healthy
-  #     rabbitmq:
-  #       condition: service_healthy
-
+    deploy:
+        replicas: 3
 volumes:
   pgdata:
   seqdata:

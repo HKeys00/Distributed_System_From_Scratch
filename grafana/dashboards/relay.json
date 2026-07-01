@@ -189,15 +189,39 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Leadership promotions",
-      "description": "Per-instance rate of becoming leader. Sum across instances = cluster handover frequency.",
+      "title": "Leadership promotions (last 5m)",
+      "description": "Number of times each replica was promoted to leader within the trailing 5-minute window. A value of 3 means 'this instance became leader 3 times in the last 5 minutes'.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "targets": [
-        { "refId": "A", "expr": "sum by (instance) (rate(relay_leadership_promotions_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}}" }
+        { "refId": "A", "expr": "sum by (instance) (increase(relay_leadership_promotions_total{instance=~\"$instance\"}[5m]))", "legendFormat": "{{instance}}" }
       ],
-      "fieldConfig": { "defaults": { "unit": "ops" } },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum", "max"] } }
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max"] } }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Leader lease age",
+      "description": "Seconds since the current leader's last heartbeat, as observed by each replica on its last DB poll. Should oscillate 0..HeartbeatIntervalSeconds; watch for climbs toward HeartbeatStaleSeconds (15s).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "refId": "A", "expr": "max(relay_leader_lease_age_seconds{instance=~\"$instance\"})", "legendFormat": "max observed" },
+        { "refId": "B", "expr": "avg(relay_leader_lease_age_seconds{instance=~\"$instance\"})", "legendFormat": "avg observed" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 10 },
+            { "color": "red", "value": 15 }
+          ]},
+          "custom": { "thresholdsStyle": { "mode": "line" } }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["max", "mean"] } }
     }
   ]
 }

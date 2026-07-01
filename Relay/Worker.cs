@@ -20,8 +20,8 @@ namespace Relay
     {
         #region Constants
 
-        private const int HeartbeatIntervalSeconds = 10;
-        private const int HeartbeatStaleSeconds = 1;
+        private const int HeartbeatIntervalSeconds = 3;
+        private const int HeartbeatStaleSeconds = 15;
 
         #endregion
 
@@ -169,6 +169,7 @@ namespace Relay
                     await OnDemotedToFollower();
                     return;
                 }
+                AppMetrics.Relay.LeaderLeaseAgeSeconds.Set(0);
                 _logger.LogInformation("Heartbeat OK, token={Token}", _myToken);
             }
             catch (Exception ex)
@@ -192,10 +193,17 @@ namespace Relay
             }
 
             const string sql = @"
-                UPDATE ""Leader""
-                SET ""Token"" = ""Token"" + 1, ""LastSeenAt"" = clock_timestamp()
-                WHERE ""Id"" = 1 AND ""LastSeenAt"" < now() - make_interval(secs => @stale)
-                RETURNING ""Token""";
+                WITH lease AS (
+                    SELECT EXTRACT(EPOCH FROM (clock_timestamp() - ""LastSeenAt"")) AS age
+                    FROM ""Leader"" WHERE ""Id"" = 1
+                ),
+                claim AS (
+                    UPDATE ""Leader""
+                    SET ""Token"" = ""Token"" + 1, ""LastSeenAt"" = clock_timestamp()
+                    WHERE ""Id"" = 1 AND ""LastSeenAt"" < clock_timestamp() - make_interval(secs => @stale)
+                    RETURNING ""Token""
+                )
+                SELECT lease.age, (SELECT ""Token"" FROM claim) AS claimed_token FROM lease";
 
             await using var context = await _dbContextFactory.CreateDbContextAsync();
             try
@@ -209,15 +217,24 @@ namespace Relay
                 await using var cmd = new NpgsqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("stale", (double)HeartbeatStaleSeconds);
 
-                var result = await cmd.ExecuteScalarAsync();
-                if (result is null or DBNull)
+                await using var reader = await cmd.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
                 {
-                    _logger.LogInformation("Leadership claim declined - current leader still alive");
+                    _logger.LogWarning("Leader row missing - cannot observe lease age or attempt claim");
                     return null;
                 }
 
-                var token = (long)result;
-                _logger.LogInformation("Leadership claim won - current leader was stale, new token={Token}", token);
+                var age = reader.GetDouble(0);
+                AppMetrics.Relay.LeaderLeaseAgeSeconds.Set(age);
+
+                if (await reader.IsDBNullAsync(1))
+                {
+                    _logger.LogInformation("Leadership claim declined - leader still alive (age={Age:F2}s)", age);
+                    return null;
+                }
+
+                var token = reader.GetInt64(1);
+                _logger.LogInformation("Leadership claim won - previous leader stale (age={Age:F2}s), new token={Token}", age, token);
                 await OnAssignedLeader(token);
                 return token;
             }
@@ -251,20 +268,20 @@ namespace Relay
 
             _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
             await _dbConnection.OpenAsync();
-            _dbConnection.Notification += OnNotify;
+            // _dbConnection.Notification += OnNotify;
 
-            await using (var listenCmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
-            {
-                try
-                {
-                    await listenCmd.ExecuteNonQueryAsync();
-                    _logger.LogInformation("Subscribed to task_channel notifications");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to create listener for task_channel");
-                }
-            }
+            // await using (var listenCmd = new NpgsqlCommand("LISTEN task_channel", _dbConnection))
+            // {
+            //     try
+            //     {
+            //         await listenCmd.ExecuteNonQueryAsync();
+            //         _logger.LogInformation("Subscribed to task_channel notifications");
+            //     }
+            //     catch (Exception ex)
+            //     {
+            //         _logger.LogError(ex, "Failed to create listener for task_channel");
+            //     }
+            // }
 
             await OnProcessOutboxQueue();
 
@@ -273,7 +290,8 @@ namespace Relay
             {
                 try
                 {
-                    await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), _leaderLoopCts.Token);
+                    // await _dbConnection.WaitAsync(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), _leaderLoopCts.Token);
+                    await Task.Delay(TimeSpan.FromSeconds(3), _leaderLoopCts.Token);
                     await WriteHeartbeat();
                 }
                 catch (OperationCanceledException)
@@ -335,10 +353,10 @@ namespace Relay
 
             if (_dbConnection is not null)
             {
-                _dbConnection.Notification -= OnNotify;
+                // _dbConnection.Notification -= OnNotify;
                 await _dbConnection.DisposeAsync();
                 _dbConnection = null;
-                _logger.LogInformation("Disposed leader DB session and unsubscribed from task_channel");
+                _logger.LogInformation("Disposed leader DB session");
             }
 
             _leaderLoopCts?.Dispose();
