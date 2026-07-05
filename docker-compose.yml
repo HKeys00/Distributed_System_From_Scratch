@@ -160,7 +160,7 @@ services:
       seq:
         condition: service_healthy
     deploy:
-        replicas: 3
+        replicas: 10
 volumes:
   pgdata:
   seqdata:

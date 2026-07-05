@@ -643,9 +643,13 @@ Ok so there would be a table called leader or something with a single row, which
 - I'm going to keep the the in memory delivery tag map purely for the latency metric and nack metric
 - Adding grafana dashboard to pipe prometheus metrics into
 
-1/06/26
+1/07/26
 - Going to tidy up grafana dashboard then its on too chaos testing
 - Once chaos testing done, onto learning Kubernetes still no idea what the fuck that even does
 - Ok yikes this leadership election is thrashing like crazy wtf
 - never mind it was stale debug values, I need to run docker build to apply 
 - Going to start up 3 workers as see what that does to throughput
+
+06/07/26
+- Still messing around with this grafana dashboard, seeing what happens when I adjust the number of workers
+- Starting adding chaos tests, don't know how in depth I'll go with these before I just sort of move on, it doesn't need to be perfect

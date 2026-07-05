@@ -45,6 +45,7 @@ namespace Relay
         private bool _processingStale;
         private bool _isLeader;
         private long _myToken;
+        private readonly string _containerId;
         private CancellationTokenSource? _leaderLoopCts;
 
         #endregion
@@ -62,6 +63,8 @@ namespace Relay
             _configuration = configuration;
             _dbContextFactory = dbContextFactory;
             _logger = logger;
+
+            _containerId = Environment.MachineName;
 
             _processingOutbox = false;
             _processingStale = false;
@@ -199,7 +202,7 @@ namespace Relay
                 ),
                 claim AS (
                     UPDATE ""Leader""
-                    SET ""Token"" = ""Token"" + 1, ""LastSeenAt"" = clock_timestamp()
+                    SET ""Token"" = ""Token"" + 1, ""LastSeenAt"" = clock_timestamp(), ""ContainerId"" = @containerId
                     WHERE ""Id"" = 1 AND ""LastSeenAt"" < clock_timestamp() - make_interval(secs => @stale)
                     RETURNING ""Token""
                 )
@@ -216,6 +219,7 @@ namespace Relay
 
                 await using var cmd = new NpgsqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("stale", (double)HeartbeatStaleSeconds);
+                cmd.Parameters.AddWithValue("containerId", _containerId);
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())

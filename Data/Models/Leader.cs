@@ -5,5 +5,6 @@ namespace Data.Models
         public int Id {get; set;}
         public DateTime LastSeenAt {get; set;}
         public long Token {get; set;}
+        public string? ContainerId {get; set;}
     }
 }

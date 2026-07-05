@@ -306,10 +306,16 @@ namespace Worker_Node.Services
 
             await context.Successes.AddAsync(new Success(job.TaskId, job.CorrelationId, job.IdempotencyId));
 
-            foreach(var child in childUrls)
+            for (int i = 0; i < 5; i++)
             {
-                await context.Tasks.AddAsync(new WorkItem(child));
+                if (childUrls.Length >= i){
+                    await context.Tasks.AddAsync(new WorkItem(childUrls[i]));
+                }
             }
+            // foreach(var child in childUrls)
+            // {
+            //     await context.Tasks.AddAsync(new WorkItem(child));
+            // }
 
             try
             {
