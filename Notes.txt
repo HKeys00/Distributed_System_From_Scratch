@@ -653,3 +653,6 @@ Ok so there would be a table called leader or something with a single row, which
 06/07/26
 - Still messing around with this grafana dashboard, seeing what happens when I adjust the number of workers
 - Starting adding chaos tests, don't know how in depth I'll go with these before I just sort of move on, it doesn't need to be perfect
+
+07/07/26
+- Working on adding more chaos tests as well as Kubernetes course
