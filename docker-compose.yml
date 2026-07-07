@@ -147,6 +147,7 @@ services:
       context: .
       dockerfile: Worker_Node/Dockerfile
     working_dir: /app
+    container_name: worker-node
     expose:
       - "9102"
     environment:
@@ -159,8 +160,8 @@ services:
         condition: service_healthy
       seq:
         condition: service_healthy
-    deploy:
-        replicas: 10
+    # deploy:
+    #     replicas: 3
 volumes:
   pgdata:
   seqdata:

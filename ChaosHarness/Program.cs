@@ -31,6 +31,10 @@ failures += await Run("chaos_sigterm_graceful_shutdown", () => ChaosSigtermGrace
     db, workload, count: 50, urlTemplate: $"{StubBaseFromContainer}/ok?n={{n}}",
     timeout: TimeSpan.FromMinutes(5)));
 
+failures += await Run("chaos_sigkill_leader", () => ChaosSigkillLeaderAsync(
+    db, workload, count: 50, urlTemplate: $"{StubBaseFromContainer}/ok?n={{n}}",
+    timeout: TimeSpan.FromMinutes(5)));
+
 failures += await Run("rate_limit_same_domain", () => RateLimitAsync(
     db, workload, count: 100, urlTemplate: $"{StubBaseFromContainer}/ok?id={{n}}&v={{n}}",
     minElapsed: TimeSpan.FromSeconds(60), timeout: TimeSpan.FromMinutes(5)));
@@ -173,6 +177,64 @@ static async Task<bool> ChaosSigtermGracefulAsync(
     return AssertExpectation(ids.Count, counts, Expectation.AllSuccess)
         && await AssertNoDuplicatesAsync(db, ids)
         && fastFailover;
+}
+
+static async Task<bool> ChaosSigkillLeaderAsync(
+    DbAccess db, Workload workload, int count, string urlTemplate, TimeSpan timeout)
+{
+    await db.TruncateAllAsync();
+    var ids = await workload.SubmitAsync(count, urlTemplate);
+    Console.WriteLine($"submitted {ids.Count} tasks");
+
+    // Give the current leader time to run TryClaimLeadership at least once
+    // so the ContainerId column is populated.
+    await Task.Delay(TimeSpan.FromSeconds(5));
+
+    var leader = await db.GetLeaderContainerAsync();
+    if (string.IsNullOrEmpty(leader))
+    {
+        Console.WriteLine("  invariant FAIL: Leader.ContainerId is null - no leader claim observed");
+        return false;
+    }
+    Console.WriteLine($"current leader (from Leader.ContainerId): {leader}");
+
+    var initialToken = await db.GetLeaderTokenAsync();
+    Console.WriteLine($"initial leader token: {initialToken}");
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    Console.WriteLine($"SIGKILL {leader}");
+    await FaultInjector.SigkillAsync(leader);
+
+    // SIGKILL has no graceful backdate, so failover has to wait out the full
+    // HeartbeatStaleSeconds (15s) interval before a follower claims, plus up to
+    // one HeartbeatIntervalSeconds (3s) of follower-poll jitter.
+    var detectDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(18);
+    long newToken = initialToken;
+    while (DateTime.UtcNow < detectDeadline)
+    {
+        newToken = await db.GetLeaderTokenAsync();
+        if (newToken > initialToken) break;
+        await Task.Delay(250);
+    }
+    sw.Stop();
+
+    var bumped = newToken > initialToken;
+    if (!bumped)
+    {
+        Console.WriteLine($"  invariant FAIL: no token bump within {sw.Elapsed.TotalSeconds:F1}s after SIGKILL");
+    }
+    else
+    {
+        Console.WriteLine($"failover: token {initialToken} -> {newToken} in {sw.Elapsed.TotalSeconds:F1}s");
+    }
+
+    await FaultInjector.StartAsync(leader);
+    Console.WriteLine($"restarted {leader}");
+
+    var counts = await PollUntilTerminalAsync(db, ids, timeout);
+    return AssertExpectation(ids.Count, counts, Expectation.AllSuccess)
+        && await AssertNoDuplicatesAsync(db, ids)
+        && bumped;
 }
 
 static async Task<bool> RateLimitAsync(

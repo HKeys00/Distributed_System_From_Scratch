@@ -259,8 +259,7 @@ namespace Worker_Node.Services
 
                 //TODO: Don't really like this being the workers job but fine for now
                 await using var transaction = await context.Database.BeginTransactionAsync();
-
-                if (job.Attempt == 5)
+                if (job.Attempt == 4) //Attempts are indexed at 0 so this is the 5th attempt
                 {       //DLQ
                     await context.DLQ.AddAsync(new Dead()
                     {
@@ -281,7 +280,7 @@ namespace Worker_Node.Services
                 await context.Database.ExecuteSqlInterpolatedAsync(                                                                                           
                     $@"UPDATE ""Tasks""                                                                                                                       
                         SET ""SentAt"" = NULL,                                                                                                                 
-                            ""NextAttemptAt"" = now() + (interval '30 seconds' * power(2, ""Attempt"")),
+                            ""NextAttemptAt"" = now() + (interval '5 seconds' * power(2, ""Attempt"")),
                             ""Attempt"" = ""Attempt"" + 1                                                    
                         WHERE ""TaskId"" = {job.TaskId}"
                 );
@@ -306,16 +305,10 @@ namespace Worker_Node.Services
 
             await context.Successes.AddAsync(new Success(job.TaskId, job.CorrelationId, job.IdempotencyId));
 
-            for (int i = 0; i < 5; i++)
+            foreach(var child in childUrls)
             {
-                if (childUrls.Length >= i){
-                    await context.Tasks.AddAsync(new WorkItem(childUrls[i]));
-                }
+                await context.Tasks.AddAsync(new WorkItem(child));
             }
-            // foreach(var child in childUrls)
-            // {
-            //     await context.Tasks.AddAsync(new WorkItem(child));
-            // }
 
             try
             {

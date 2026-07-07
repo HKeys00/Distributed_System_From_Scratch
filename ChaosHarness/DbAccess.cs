@@ -55,6 +55,15 @@ internal sealed class DbAccess
         return result is null or DBNull ? 0L : (long)result;
     }
 
+    public async Task<string?> GetLeaderContainerAsync()
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT \"ContainerId\" FROM \"Leader\" WHERE \"Id\" = 1", conn);
+        var result = await cmd.ExecuteScalarAsync();
+        return result is null or DBNull ? null : (string)result;
+    }
+
     public async Task<long> CountDuplicateSuccessesAsync(IReadOnlyCollection<Guid> taskIds)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
