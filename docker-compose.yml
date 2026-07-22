@@ -147,7 +147,6 @@ services:
       context: .
       dockerfile: Worker_Node/Dockerfile
     working_dir: /app
-    container_name: worker-node
     expose:
       - "9102"
     environment:

@@ -32,6 +32,81 @@ internal static class FaultInjector
         return null;
     }
 
+    public static async Task<string> GetHealthAsync(string container)
+    {
+        var (stdout, _) = await DockerCaptureAsync(
+            "inspect",
+            "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+            container);
+        return stdout.Trim();
+    }
+
+    public static async Task<bool> WaitForHealthyAsync(string container, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                if (await GetHealthAsync(container) == "healthy") return true;
+            }
+            catch (InvalidOperationException)
+            {
+                // Container is mid-restart and not yet inspectable.
+            }
+            await Task.Delay(1000);
+        }
+        return false;
+    }
+
+    public static async Task ScaleServiceAsync(string serviceName, int replicas)
+    {
+        await ComposeAsync("up", "-d", "--no-build", "--no-recreate",
+            "--scale", $"{serviceName}={replicas}", serviceName);
+    }
+
+    public static async Task<List<string>> WaitForServiceContainersAsync(
+        string serviceName, int expected, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        var containers = new List<string>();
+        while (DateTime.UtcNow < deadline)
+        {
+            containers = await GetServiceContainersAsync(serviceName);
+            if (containers.Count == expected) return containers;
+            await Task.Delay(500);
+        }
+        return containers;
+    }
+
+    private static async Task ComposeAsync(params string[] args)
+    {
+        var psi = BuildPsi(new[] { "compose" }.Concat(args).ToArray());
+        psi.WorkingDirectory = FindRepoRoot();
+        using var p = Process.Start(psi)!;
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        var err = await stderrTask;
+        await stdoutTask;
+        if (p.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"docker compose {string.Join(' ', args)} failed: {err}");
+        }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "docker-compose.yml"))) return dir.FullName;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException(
+            $"could not locate docker-compose.yml above {AppContext.BaseDirectory}");
+    }
+
     private static async Task DockerAsync(params string[] args)
     {
         var psi = BuildPsi(args);
