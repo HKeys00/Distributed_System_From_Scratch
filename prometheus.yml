@@ -7,6 +7,13 @@ scrape_configs:
     static_configs:
       - targets: ['controllers:9101']
 
+  # TODO(k3s): dns_sd_configs relies on Compose DNS returning one A record per
+  # replica. k3s Services return a single ClusterIP, so this would scrape one
+  # arbitrary Relay and silently drop the other replicas from the dashboards.
+  # Needs a k3s-specific copy of this file using kubernetes_sd_configs (role: pod,
+  # keep on label app=relay). That copy also needs RBAC - the Prometheus
+  # ServiceAccount must have list/watch on pods, or the job returns zero targets
+  # with no error. The other three jobs below work as-is in both environments.
   - job_name: relay
     dns_sd_configs:
       - names: ['relay']

@@ -75,6 +75,8 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
     volumes:
+      # TODO(k3s): becomes a ConfigMap. See the TODO in prometheus.yml - the k3s
+      # copy needs a different relay job.
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheusdata:/prometheus
     ports:
@@ -90,6 +92,9 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
+      # TODO(k3s): both bind mounts become ConfigMaps. The datasource URL
+      # (http://prometheus:9090) needs no change - k3s Service DNS resolves it the
+      # same way, as long as the Service is named prometheus.
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
