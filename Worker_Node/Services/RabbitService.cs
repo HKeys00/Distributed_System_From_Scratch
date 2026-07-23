@@ -9,8 +9,23 @@ namespace Worker_Node.Services
     {
         #region Fields
 
+        private readonly IConfiguration _configuration;
+
         private IConnection? _connection;
         private IChannel? _channel;
+
+        #endregion
+
+        #region Constructor
+
+        /// <summary>
+        /// Initializes a new instance of the rabbit service.
+        /// </summary>
+        /// <param name="configuration">The injected configuration.</param>
+        public RabbitService(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
 
         #endregion
 
@@ -20,7 +35,10 @@ namespace Worker_Node.Services
         {
             if (_connection == null || !_connection.IsOpen)
             {
-                var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
+                var rabbitUri = _configuration.GetConnectionString("RabbitMq")
+                    ?? throw new InvalidOperationException("ConnectionStrings:RabbitMq is not configured");
+
+                var factory = new ConnectionFactory() { Uri = new Uri(rabbitUri) };
                 _connection = await factory.CreateConnectionAsync();
                 _channel = await _connection.CreateChannelAsync(null);
 

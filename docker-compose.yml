@@ -25,9 +25,6 @@ services:
     working_dir: /app
     ports:
       - "9104:9104"
-    environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
-      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy
@@ -112,8 +109,6 @@ services:
       - "9101:9101"
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:5000
-      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
-      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy
@@ -127,9 +122,6 @@ services:
     working_dir: /app
     expose:
       - "9102"
-    environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
-      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy
@@ -149,9 +141,6 @@ services:
     working_dir: /app
     expose:
       - "9102"
-    environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
-      Seq__ServerUrl: "http://seq:80"
     depends_on:
       postgres_db:
         condition: service_healthy

@@ -94,7 +94,10 @@ namespace Relay
         /// <inheritdoc />
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var factory = new ConnectionFactory() { HostName = "rabbitmq", Port = 5672 };
+            var rabbitUri = _configuration.GetConnectionString("RabbitMq")
+                ?? throw new InvalidOperationException("ConnectionStrings:RabbitMq is not configured");
+
+            var factory = new ConnectionFactory() { Uri = new Uri(rabbitUri) };
             _rabbitConnection = await factory.CreateConnectionAsync(stoppingToken);
 
             await SeedLeaderRow(stoppingToken);
@@ -270,7 +273,7 @@ namespace Relay
 
             _logger.LogInformation("Promoted to LEADER (token={Token}) - enabling outbox/stale timers, disabling poll", token);
 
-            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("Default"));
+            _dbConnection = new NpgsqlConnection(_configuration.GetConnectionString("DefaultConnection"));
             await _dbConnection.OpenAsync();
             // _dbConnection.Notification += OnNotify;
 

@@ -1,0 +1,22 @@
+services:
+  data:
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      Seq__ServerUrl: "http://seq:80"
+
+  controllers:
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      Seq__ServerUrl: "http://seq:80"
+
+  relay:
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+      Seq__ServerUrl: "http://seq:80"
+
+  worker-node:
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres_db;Port=5432;Database=mydatabase;Username=myuser;Password=mypassword"
+      ConnectionStrings__RabbitMq: "amqp://guest:guest@rabbitmq:5672"
+      Seq__ServerUrl: "http://seq:80"

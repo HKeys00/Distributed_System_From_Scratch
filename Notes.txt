@@ -656,3 +656,12 @@ Ok so there would be a table called leader or something with a single row, which
 
 07/07/26
 - Working on adding more chaos tests as well as Kubernetes course
+
+22/07/26
+- Starting phase 3 installing K3s to remote Linux box
+- Downloaded k3s.yaml file to project folder, no idea what I'm doing with this yet
+- Ok hooked up Lens and powershell to the k3s.yaml file can execute commands and view pods from within lens
+- Moving connections strings to docker-compose.override.yml file (kind of get why I need to do this but not super sure)
+
+24/07/26
+- Still moving connection strings
