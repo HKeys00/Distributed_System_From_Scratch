@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: relay-deployment
+spec:
+    replicas: 3
+    selector:
+        matchLabels:
+            app: relay
+    template:
+        metadata:
+            labels:
+                app: relay
+        spec:
+            containers:
+            

@@ -671,3 +671,4 @@ Ok so there would be a table called leader or something with a single row, which
 - Tinkering with persistent volumes
 - Created a stateful set for the PostgreSQL pod, when it was created patched the PV to use retain as its reclaim method
 - Exec'd into the pod and was able to create a table with a row, delete the pod, stateful set recreated the pod with the table and row still intact
+- Done the same to rabbitmq

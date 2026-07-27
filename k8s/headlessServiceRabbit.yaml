@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-svc
+spec:
+  clusterIP: None
+  selector:
+    app: rabbitmq-a
+  ports:
+    - protocol: TCP
+      port: 5672
+      targetPort: rbtmq-amqp-port
+    - protocol: TCP
+      port: 15672
+      targetPort: rbtmq-mgmt-port

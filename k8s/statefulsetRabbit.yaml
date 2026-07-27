@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq-sfs
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq-a
+  serviceName: 'rabbitmq-svc'
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: rabbitmq-a
+    spec:
+      terminationGracePeriodSeconds: 30 #Data doesn't live in RabbitMQ, once it's in the postgres database it's durable, therefore we worry less about potential data loss from a faster shutdown
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.13-management
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              value: myuser
+            - name: RABBITMQ_DEFAULT_PASS
+              value: mypassword
+          ports:
+            - containerPort: 5672
+              name: rbtmq-amqp-port
+            - containerPort: 15672
+              name: rbtmq-mgmt-port
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 1Gi
+        storageClassName: local-path
