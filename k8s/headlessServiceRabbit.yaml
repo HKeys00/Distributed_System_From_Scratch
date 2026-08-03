@@ -3,13 +3,14 @@ kind: Service
 metadata:
   name: rabbitmq-svc
 spec:
-  clusterIP: None
   selector:
     app: rabbitmq-a
   ports:
-    - protocol: TCP
+    - name: amqp
+      protocol: TCP
       port: 5672
       targetPort: rbtmq-amqp-port
-    - protocol: TCP
+    - name: management
+      protocol: TCP
       port: 15672
       targetPort: rbtmq-mgmt-port

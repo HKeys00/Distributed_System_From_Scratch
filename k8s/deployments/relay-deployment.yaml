@@ -14,8 +14,22 @@ spec:
     spec:
       containers:
         - name: relay
-          image: ghcr.io/hkeys00/relay:latest
+          image: 'ghcr.io/hkeys00/relay@sha256:ad55bfa899e2e8a7e17ac4430fb6366344aa1608054cac330da1af8da60638f7'
           ports:
             - containerPort: 8080
-          imagePullSecrets:
-            - name: ghcr-secret
+          env:
+            - name: ConnectionStrings__DefaultConnection
+              value: "Host=postgresql-svc;Port=80;Database=postgres;Username=postgres;Password=mypassword"
+            - name: ConnectionStrings__RabbitMq
+              value: "amqp://myuser:mypassword@rabbitmq-svc:5672"
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 3
+      imagePullSecrets:
+        - name: ghcr-secret

@@ -682,3 +682,10 @@ Ok so there would be a table called leader or something with a single row, which
 - Written first working relay deployment file, using imagePullSecrets in the YAML to pull from ghcr.io where my image is stored
 - Using a PAT that has been stored on the Linux box, not using GitHub actions yet
 - POD starts up but immediately dies due to lack of RabbitMQ endpoint passed through env vars
+- Fixed connection string to find appropriate service, changed service from headless to standard, I don't think there's really a difference for the current usecase
+- Still getting connection refused error, url is resolving correctly but getting refused
+- Issue was RabbitMQ was launching expecting multiple instances, so it was trying to form a raft quorum but getting stuck since there was only one instance, no idea why it thought that but recreating the stateful set and PVC fixed it, now the postgres url is broken.
+
+4/08/26
+- Postgres url is working but migrations haven't been applied so relay app gets stuck not being able to determine a leader, not super important right now so I can probably move on too the liveness probe
+- 

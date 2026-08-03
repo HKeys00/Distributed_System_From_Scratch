@@ -1,18 +1,23 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Data;
 using Relay;
 using Shared.Helpers;
 
-var builder = Host.CreateDefaultBuilder(args)
-    .UseSeqLogging("Relay")
-    .ConfigureServices((context, services) =>
-    {
-        services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(context.Configuration.GetConnectionString("DefaultConnection")));
-        services.AddDbContextFactory<ApplicationDbContext>();
-        services.AddPrometheusMetrics(port: 9102);
-        services.AddHostedService<Worker>();
-    });
+var builder = WebApplication.CreateBuilder(args);
 
-var host = builder.Build();
-host.Run();
+builder.Host.UseSeqLogging("Relay");
+
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+builder.Services.AddDbContextFactory<ApplicationDbContext>();
+builder.Services.AddPrometheusMetrics(port: 9102);
+builder.Services.AddHostedService<Worker>();
+
+builder.Services.AddHealthChecks();
+
+var app = builder.Build();
+
+app.MapHealthChecks("/healthz");
+
+app.Run();
