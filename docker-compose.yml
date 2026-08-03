@@ -121,6 +121,7 @@ services:
         condition: service_healthy
 
   relay:
+    image: ghcr.io/hkeys00/relay:latest
     build:
       context: .
       dockerfile: Relay/Dockerfile

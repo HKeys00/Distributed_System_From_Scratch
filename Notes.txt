@@ -671,4 +671,14 @@ Ok so there would be a table called leader or something with a single row, which
 - Tinkering with persistent volumes
 - Created a stateful set for the PostgreSQL pod, when it was created patched the PV to use retain as its reclaim method
 - Exec'd into the pod and was able to create a table with a row, delete the pod, stateful set recreated the pod with the table and row still intact
-- Done the same to rabbitmq
+- Done the same to RabbitMQ
+
+
+28/07/26
+- Pushed relay to ghcr through CLI
+- Writing relay reployment
+
+3/08/26
+- Written first working relay deployment file, using imagePullSecrets in the YAML to pull from ghcr.io where my image is stored
+- Using a PAT that has been stored on the Linux box, not using GitHub actions yet
+- POD starts up but immediately dies due to lack of RabbitMQ endpoint passed through env vars
