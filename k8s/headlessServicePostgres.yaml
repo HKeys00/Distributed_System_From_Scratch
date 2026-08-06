@@ -3,10 +3,10 @@ kind: Service
 metadata:
   name: postgresql-svc
 spec:
+  clusterIP: None
   selector:
     app: postgresql-a
   ports:
-    - name: postgres
-      protocol: TCP
-      port: 80
+    - protocol: TCP
+      port: 5432
       targetPort: postgresql-port
