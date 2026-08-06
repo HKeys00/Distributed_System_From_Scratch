@@ -688,4 +688,14 @@ Ok so there would be a table called leader or something with a single row, which
 
 4/08/26
 - Postgres url is working but migrations haven't been applied so relay app gets stuck not being able to determine a leader, not super important right now so I can probably move on too the liveness probe
-- 
+
+7/08/26
+- Working on applying migrations in my K8s cluster, it eventually needs to exist in a CI/CD pipeline but for now, it can probably just be a SQL script and a K8s job, but that isn't scalable so tossing up doing it the full way or the half ass way.
+- I'm thinking because my Data project contains all the migration info and everything with a dockerfile that runs the migrations on launch I could just push that image to a K8s pod, granted that would mean other pods would have to wait on it to become healthy meaning migrations are complete and it could be shutdown and respun up at any time causing migrations to be run randomly
+- Ok that's what a K8 job is for
+- Ok I misread what my data docker file does, it does the migration on publish not on run
+- Tuned my Data project to just run migrations and exist, I think that's better suited to it anyway
+- Got the data job running and applying migrations successfully, relay pod can now hit the database and claim leadership
+- Relay pod keeps dying, likely due to using an old image
+- Yep pushed new image and it's working fine now, got tech debt in regards to the relay start up seeding the database, if the database isn't ready there's no retry logic so it'll just fail forever
+- Now onto deploying the controller

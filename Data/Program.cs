@@ -29,5 +29,3 @@ using (var scope = app.Services.CreateScope())
         logger.LogInformation("No pending migrations found");
     }
 }
-
-app.Run();
