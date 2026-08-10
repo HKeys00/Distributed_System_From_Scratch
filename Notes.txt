@@ -699,3 +699,11 @@ Ok so there would be a table called leader or something with a single row, which
 - Relay pod keeps dying, likely due to using an old image
 - Yep pushed new image and it's working fine now, got tech debt in regards to the relay start up seeding the database, if the database isn't ready there's no retry logic so it'll just fail forever
 - Now onto deploying the controller
+
+10/08/26
+- Deploying controller, need a service, the deployed controller itself and an ingress, no clue what that is so it'll be last, instead I'll probably start with the controller, chuck and cluster ip service infront of that and then do the ingress.
+- This isn't going to be a headless service since we want multiple replicas and load balancing, I think that's really the only reason why you wouldn't have one because otherwise you'd just hit the pod you want directly
+- Ok so ingress is deprecated apparently so switching to the new gateway API
+- Trying to wrap my head around all the pieces
+- Install the envoy gateway and basically my understanding of it is, I create a gateway class that points at the envoy gateway builder that I installed, then I create a gateway that uses the gateway class, this gateway is the front door and the envoy builder will create the required pod for it since I'm using the registered gateway class, then I create a httproute file to direct where traffic is going.
+- Got all the parts up but they aren't talking, problem for later I reckon.

@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+    spec:
+      containers:
+        - name: controller
+          image: 'ghcr.io/hkeys00/controllers:v1.0.0'
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ConnectionStrings__DefaultConnection
+              value: "Host=postgresql-sfs-0.postgresql-svc.default.svc.cluster.local;Port=5432;Database=postgres;Username=postgres;Password=mypassword"
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+          # livenessProbe:
+          #   httpGet:
+          #     path: /healthz
+          #     port: 8080
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          #   failureThreshold: 3
+      imagePullSecrets:
+        - name: ghcr-secret
