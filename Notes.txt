@@ -707,3 +707,8 @@ Ok so there would be a table called leader or something with a single row, which
 - Trying to wrap my head around all the pieces
 - Install the envoy gateway and basically my understanding of it is, I create a gateway class that points at the envoy gateway builder that I installed, then I create a gateway that uses the gateway class, this gateway is the front door and the envoy builder will create the required pod for it since I'm using the registered gateway class, then I create a httproute file to direct where traffic is going.
 - Got all the parts up but they aren't talking, problem for later I reckon.
+
+11/08/26
+- Later has arrived
+- Reason it wasn't working k3s had kicked off a lb pod for traefik and that was taking port 80 from my envoy load balancer.
+- Can now hit x.x.x.x/crawl and hit the controller pod in my k8s cluter
