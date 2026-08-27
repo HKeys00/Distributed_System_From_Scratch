@@ -7,6 +7,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseSeqLogging("Controllers");
 
+builder.Services.AddHealthChecks();
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddDbContextFactory<ApplicationDbContext>();
@@ -17,6 +19,7 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
+app.MapHealthChecks("/healthz");
 app.UseMiddleware<CorrelationIdMiddleware>();
 
 app.MapControllers();

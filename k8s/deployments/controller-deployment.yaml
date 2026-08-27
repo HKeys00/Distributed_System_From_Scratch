@@ -14,20 +14,32 @@ spec:
     spec:
       containers:
         - name: controller
-          image: 'ghcr.io/hkeys00/controllers:v1.0.0'
+          image: ghcr.io/hkeys00/controllers:v1.0.1
           ports:
             - containerPort: 8080
           env:
             - name: ConnectionStrings__DefaultConnection
-              value: "Host=postgresql-sfs-0.postgresql-svc.default.svc.cluster.local;Port=5432;Database=postgres;Username=postgres;Password=mypassword"
+              value: Host=postgresql-sfs-0.postgresql-svc.default.svc.cluster.local;Port=5432;Database=postgres;Username=postgres;Password=mypassword
             - name: ASPNETCORE_URLS
-              value: "http://+:8080"
-          # livenessProbe:
-          #   httpGet:
-          #     path: /healthz
-          #     port: 8080
-          #   initialDelaySeconds: 5
-          #   periodSeconds: 10
-          #   failureThreshold: 3
+              value: http://+:8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
       imagePullSecrets:
         - name: ghcr-secret

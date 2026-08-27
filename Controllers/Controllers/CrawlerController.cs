@@ -9,7 +9,7 @@ using Shared.Helpers;
 namespace Controllers.Controllers
 {
     /// <summary>
-    /// Handles image-related HTTP requests in the application.
+    /// Handles crawl HTTP requests in the application.
     /// </summary>
     [ApiController]
     [Route("crawl")]
