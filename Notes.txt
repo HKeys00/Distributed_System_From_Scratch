@@ -712,3 +712,14 @@ Ok so there would be a table called leader or something with a single row, which
 - Later has arrived
 - Reason it wasn't working k3s had kicked off a lb pod for traefik and that was taking port 80 from my envoy load balancer.
 - Can now hit x.x.x.x/crawl and hit the controller pod in my k8s cluter
+- I reckon this will come back to bite me in the ass when I deploy it live, if I run into gateway issues, or my pod isn't launching correctly then it's due to this issue.
+- Working on readiness, startup and liveness probes
+
+31/08/26
+- Docker compose not working for some reason, it's been a second since I debugged locally
+- Debugging locally so I can test my new readiness endpoint to test the readiness probe
+- The readiness probe just hits an endpoint that checks if the database connection is live or not, does it need to go further and test if the table exists (probably)
+- I remember now what the issue with docker compose was, Data project won't launch correctly fucking whyyyyy
+- Also I think the relay deployment is broken in the sense that the Data project isn't depended upon to start the relay.
+- I'm not quite sure how migrations have even been applied to the database to begin with.
+- But thinking about it now the data project almost doesn't even need to exist, during the CLI pipeline as long as migrations are ran before the relay is deployed then it's sweet
