@@ -723,3 +723,8 @@ Ok so there would be a table called leader or something with a single row, which
 - Also I think the relay deployment is broken in the sense that the Data project isn't depended upon to start the relay.
 - I'm not quite sure how migrations have even been applied to the database to begin with.
 - But thinking about it now the data project almost doesn't even need to exist, during the CLI pipeline as long as migrations are ran before the relay is deployed then it's sweet
+- Was it really an app.run() missing in the data project
+- Wow I spent this entire mornings session fixing this issue, sick
+- Ah so data is a job, so the dependency isn't even really there anymore
+- Need to create a new version of the relay container
+- compose issue fixed

@@ -131,7 +131,7 @@ services:
       postgres_db:
         condition: service_healthy
       data:
-        condition: service_healthy
+        condition: service_started
       rabbitmq:
         condition: service_healthy
       seq:
@@ -149,6 +149,8 @@ services:
     depends_on:
       postgres_db:
         condition: service_healthy
+      data:
+        condition: service_started
       rabbitmq:
         condition: service_healthy
       seq:
