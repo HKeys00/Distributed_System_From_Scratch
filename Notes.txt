@@ -730,4 +730,6 @@ Ok so there would be a table called leader or something with a single row, which
 - compose issue fixed
 
 2/09/26
+- Added ready endpoint to controller, can use that to hit database to see if connection is available
+- Got the role of a readiness probe mixed up, should be a lot dumber, moving database ping logic to startup probe
 - 

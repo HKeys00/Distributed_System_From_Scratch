@@ -24,7 +24,7 @@ spec:
               value: http://+:8080
           startupProbe:
             httpGet:
-              path: /ready
+              path: /startup
               port: 8080
             failureThreshold: 30
             periodSeconds: 10
