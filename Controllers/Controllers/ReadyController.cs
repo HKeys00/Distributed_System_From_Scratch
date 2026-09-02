@@ -1,5 +1,4 @@
-﻿using Controllers.Requests;
-using Data;
+﻿using Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -39,15 +38,16 @@ namespace Controllers.Controllers
         [HttpGet]
         public async Task<IActionResult> Ready(CancellationToken token)
         {
-            try
+            using var context = await _dbContextFactory.CreateDbContextAsync(token);
+            bool isAvailable = await context.Database.CanConnectAsync(token);
+
+            if (isAvailable)
             {
-                var context = await _dbContextFactory.CreateDbContextAsync(token);
                 return Ok();
-            } catch
-            {
-                _logger.LogWarning("Failed to reach database, not ready");
-                return Forbid();
             }
+
+            _logger.LogWarning("Failed to reach database, not ready");
+            return BadRequest();
         }
 
         #endregion

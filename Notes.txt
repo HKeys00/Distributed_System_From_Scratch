@@ -728,3 +728,6 @@ Ok so there would be a table called leader or something with a single row, which
 - Ah so data is a job, so the dependency isn't even really there anymore
 - Need to create a new version of the relay container
 - compose issue fixed
+
+2/09/26
+- 

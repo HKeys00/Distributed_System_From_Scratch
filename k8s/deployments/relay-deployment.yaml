@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: relay
-          image: 'ghcr.io/hkeys00/relay:v1.0.1'
+          image: ghcr.io/hkeys00/relay:v1.0.2
           ports:
             - containerPort: 8080
           env:

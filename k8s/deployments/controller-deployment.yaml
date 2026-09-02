@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: controller
-          image: ghcr.io/hkeys00/controllers:v1.0.1
+          image: ghcr.io/hkeys00/controllers:v1.0.2
           ports:
             - containerPort: 8080
           env:
@@ -24,7 +24,7 @@ spec:
               value: http://+:8080
           startupProbe:
             httpGet:
-              path: /healthz
+              path: /ready
               port: 8080
             failureThreshold: 30
             periodSeconds: 10
@@ -37,7 +37,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /healthz
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
