@@ -26,8 +26,9 @@ spec:
             httpGet:
               path: /startup
               port: 8080
-            failureThreshold: 30
-            periodSeconds: 10
+            failureThreshold: 27
+            periodSeconds: 3
+            timeoutSeconds: 10
           livenessProbe:
             httpGet:
               path: /healthz

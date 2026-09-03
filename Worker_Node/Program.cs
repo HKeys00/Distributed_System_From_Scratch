@@ -17,6 +17,10 @@ builder.Services.AddPrometheusMetrics(port: 9103);
 builder.Services.AddDatabaseReadyGate();
 builder.Services.AddHostedService<WebCrawlerService>();
 
+builder.Services.AddHealthChecks();
+
 var app = builder.Build();
+
+app.MapHealthChecks("/healthz");
 
 app.Run();

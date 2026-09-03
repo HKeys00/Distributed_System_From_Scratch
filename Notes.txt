@@ -732,4 +732,13 @@ Ok so there would be a table called leader or something with a single row, which
 2/09/26
 - Added ready endpoint to controller, can use that to hit database to see if connection is available
 - Got the role of a readiness probe mixed up, should be a lot dumber, moving database ping logic to startup probe
-- 
+
+3/09/26
+- Updating failure threshold for startup budget worst boot, doubled x period (3s period)
+- Controller probe stays alive whilst postgres goes down due to dumb liveness probe
+- Working on worker deployment, treating as cattle
+- deployed workers, seeing some weird logs, need to find a way to connect to the postgres db from my laptop so I can see what's happening inside the database
+
+04/09/26
+- Testing worker deployment, testing how the system handles scaling up and down the worker count dramatically
+- When scaling up to ~15 workers notice an issue of domain throttling, since the bucket is in process a domain can be hit up to N (worker number) times per second. Need to move the domain bucket to an SQL table and hit it from there

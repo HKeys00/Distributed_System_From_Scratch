@@ -187,7 +187,7 @@ namespace Worker_Node.Services
                 var random = new Random();
                 var retry = TimeSpan.FromSeconds(5);
                 lease.TryGetMetadata(MetadataName.RetryAfter, out retry);
-                retry.Add(TimeSpan.FromSeconds(random.Next(10)));
+                retry = retry.Add(TimeSpan.FromSeconds(random.Next(10)));
                 await context.Database.ExecuteSqlInterpolatedAsync(
                     $@"UPDATE ""Tasks""
                         SET ""SentAt"" = NULL,
