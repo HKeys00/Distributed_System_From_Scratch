@@ -184,10 +184,9 @@ namespace Worker_Node.Services
             {
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Failed to aquire token for job", job.CorrelationId, job.TaskId);
                 
-                var random = new Random();
-                var retry = TimeSpan.FromSeconds(5);
-                lease.TryGetMetadata(MetadataName.RetryAfter, out retry);
-                retry = retry.Add(TimeSpan.FromSeconds(random.Next(10)));
+                lease.TryGetMetadata(MetadataName.RetryAfter, out var retry);
+                retry = retry != TimeSpan.Zero ? retry : TimeSpan.FromSeconds(5);
+                retry = retry.Add(TimeSpan.FromSeconds(Random.Shared.Next(10)));
                 await context.Database.ExecuteSqlInterpolatedAsync(
                     $@"UPDATE ""Tasks""
                         SET ""SentAt"" = NULL,
@@ -196,7 +195,6 @@ namespace Worker_Node.Services
                 );
 
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
-                await context.SaveChangesAsync();
 
                 lease.Dispose();
                 return;

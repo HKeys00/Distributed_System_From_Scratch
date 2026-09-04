@@ -43,6 +43,11 @@ namespace Data
         /// Represents the leader heartbeat table.
         /// </summary>
         public DbSet<Leader> Leader {get; set;}
+
+        /// <summary>
+        /// Represents the per-domain crawl lease table.
+        /// </summary>
+        public DbSet<Lease> Leases {get; set;}
         #endregion
 
         #region Constructor
@@ -101,6 +106,13 @@ namespace Data
 
             modelBuilder.Entity<Leader>()
             .ToTable(t => t.HasCheckConstraint("CK_ID", "\"Id\" = 1"));
+
+            modelBuilder.Entity<Lease>()
+            .HasKey(l => l.Domain);
+
+            modelBuilder.Entity<Lease>()
+            .Property(l => l.LastSeenAt)
+            .HasDefaultValueSql("clock_timestamp()");
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");

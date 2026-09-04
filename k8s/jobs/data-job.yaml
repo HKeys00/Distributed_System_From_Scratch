@@ -10,7 +10,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: data
-          image: ghcr.io/hkeys00/data:v1.0.1
+          image: ghcr.io/hkeys00/data:v1.0.2
           env:
             - name: ConnectionStrings__DefaultConnection
               value: "Host=postgresql-sfs-0.postgresql-svc.default.svc.cluster.local;Port=5432;Database=postgres;Username=postgres;Password=mypassword"
