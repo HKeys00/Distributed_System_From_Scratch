@@ -2,6 +2,7 @@ using Data;
 using Data.Models.Status;
 using Data.Models.Task;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using RabbitMQ.Client.Events;
 using Shared.Constants;
 using Shared.DTOs;
@@ -10,7 +11,6 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.RateLimiting;
 
 namespace Worker_Node.Services
 {
@@ -29,7 +29,6 @@ namespace Worker_Node.Services
         private readonly HttpClient _httpClient;
         private readonly ILogger<WebCrawlerService> _logger;
         private string? _consumerTag;
-        private PartitionedRateLimiter<string> _bucket;
 
         private const string UserAgent = "DistributedSystemCrawler/1.0 (+friendly-bot)";
         private static readonly TimeSpan PolitenessDelay = TimeSpan.FromSeconds(1);
@@ -64,21 +63,6 @@ namespace Worker_Node.Services
             _httpClient = httpClientFactory.CreateClient(nameof(WebCrawlerService));
             _httpClient.Timeout = RequestTimeout;
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
-
-            _bucket = PartitionedRateLimiter.Create<string, string>(domain =>
-            {
-                   return RateLimitPartition.GetTokenBucketLimiter(
-                        partitionKey: domain,
-                        factory: key => new TokenBucketRateLimiterOptions
-                        {
-                            TokenLimit = 1,
-                            TokensPerPeriod = 1,
-                            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-                            QueueLimit = 0,
-                            AutoReplenishment = true
-                        }
-                    );
-            });
         }
 
         #endregion
@@ -175,17 +159,43 @@ namespace Worker_Node.Services
                 job.CorrelationId, job.TaskId);
 
             _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Attempting to aquire token for job", job.CorrelationId, job.TaskId);
-            
-            var uri = new Uri(job.Url);
-            var lease = await _bucket.AcquireAsync(uri.Host);
 
             await using var context = await _dbContextFactory.CreateDbContextAsync();
-            if (!lease.IsAcquired)
+            var uri = new Uri(job.Url);
+
+            const string sql = @"
+              WITH cur AS (
+                  SELECT EXTRACT(EPOCH FROM (clock_timestamp() - ""LastSeenAt""))::float8 AS age
+                  FROM ""Leases"" WHERE ""Domain"" = @domain
+              ),
+              claim AS (
+                  INSERT INTO ""Leases"" (""Domain"", ""LastSeenAt"")
+                  VALUES (@domain, clock_timestamp())
+                  ON CONFLICT (""Domain"") DO UPDATE
+                      SET ""LastSeenAt"" = clock_timestamp()
+                      WHERE ""Leases"".""LastSeenAt"" < clock_timestamp() - make_interval(secs => @delay)
+                  RETURNING 1
+              )
+              SELECT (SELECT age FROM cur) AS age, EXISTS (SELECT 1 FROM claim) AS acquired";
+
+            var conn = (NpgsqlConnection)context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
             {
+                await conn.OpenAsync();
+            }
+
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("domain", uri.Host);
+            cmd.Parameters.AddWithValue("delay", PolitenessDelay.TotalSeconds);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            await reader.ReadAsync();
+
+            var isAcquired = reader.GetBoolean(1);
+            if (!isAcquired)
+            {
+                await reader.CloseAsync();
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Failed to aquire token for job", job.CorrelationId, job.TaskId);
-                
-                lease.TryGetMetadata(MetadataName.RetryAfter, out var retry);
-                retry = retry != TimeSpan.Zero ? retry : TimeSpan.FromSeconds(5);
+                var retry = TimeSpan.FromSeconds(5);
                 retry = retry.Add(TimeSpan.FromSeconds(Random.Shared.Next(10)));
                 await context.Database.ExecuteSqlInterpolatedAsync(
                     $@"UPDATE ""Tasks""
@@ -195,8 +205,6 @@ namespace Worker_Node.Services
                 );
 
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
-
-                lease.Dispose();
                 return;
             }
 
@@ -209,10 +217,6 @@ namespace Worker_Node.Services
             catch
             {
                 await consumer.Channel.BasicRejectAsync(args.DeliveryTag, false);
-            } 
-            finally
-            {
-                lease.Dispose();
             }
         }
 

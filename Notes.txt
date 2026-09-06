@@ -743,3 +743,7 @@ Ok so there would be a table called leader or something with a single row, which
 - Testing worker deployment, testing how the system handles scaling up and down the worker count dramatically
 - When scaling up to ~15 workers notice an issue of domain throttling, since the bucket is in process a domain can be hit up to N (worker number) times per second. Need to move the domain bucket to an SQL table and hit it from there
 - Created lease table, domain is the primary key will just have one entry for each domain and update the timelastseen property, I don't think it'll ever be worth cleaning up that table, even though it will just grow, either way a cron job can just wipe the table every 48 hours or something if need be.
+
+
+07/09/26
+- Need to write the lease logic for the workers, can re use a lot of the existing stuff I reckon, how am i gonna test this?
