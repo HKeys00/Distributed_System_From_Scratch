@@ -155,8 +155,8 @@ services:
         condition: service_healthy
       seq:
         condition: service_healthy
-    # deploy:
-    #     replicas: 3
+    deploy:
+        replicas: 5
 volumes:
   pgdata:
   seqdata:
