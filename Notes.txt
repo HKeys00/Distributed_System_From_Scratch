@@ -748,3 +748,8 @@ Ok so there would be a table called leader or something with a single row, which
 07/09/26
 - Need to write the lease logic for the workers, can re use a lot of the existing stuff I reckon, how am i gonna test this?
 - Finished writing the logic, realise this won't work, just having a second buffer means a lot of requests are going to get blocked 
+
+08/09/26
+- Need to write an actual bucket that refills rather a flat delay right?
+- Nah I guess this is fine for now
+- Updating grafana metrics to split the outbox oldest measure into oldest scheduled and oldest active to differentiate between when the system is actively choking or not

@@ -191,9 +191,9 @@ namespace Worker_Node.Services
             await reader.ReadAsync();
 
             var isAcquired = reader.GetBoolean(1);
+            await reader.CloseAsync();
             if (!isAcquired)
             {
-                await reader.CloseAsync();
                 _logger.LogInformation("CorrelationId={CorrelationId} TaskId={TaskId} Failed to aquire token for job", job.CorrelationId, job.TaskId);
                 var retry = TimeSpan.FromSeconds(5);
                 retry = retry.Add(TimeSpan.FromSeconds(Random.Shared.Next(10)));

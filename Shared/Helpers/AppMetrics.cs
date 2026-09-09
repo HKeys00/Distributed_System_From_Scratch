@@ -43,6 +43,10 @@ public static class AppMetrics
             "relay_outbox_oldest_unpublished_age_seconds",
             "Age, in seconds, of the oldest unpublished task in the outbox view (0 if empty).");
 
+        public static readonly Gauge OutboxOldestScheduledSeconds = Metrics.CreateGauge(
+            "relay_outbox_oldest_scheduled_age_seconds",
+            "Age, in seconds, of the oldest scheduled task in the outbox view (0 if empty).");
+
         public static readonly Gauge StaleDepth = Metrics.CreateGauge(
             "relay_stale_depth",
             "Current number of items in the stale tasks view.");
