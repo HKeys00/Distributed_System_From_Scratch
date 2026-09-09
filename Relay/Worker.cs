@@ -493,9 +493,12 @@ namespace Relay
             try
             {
                 AppMetrics.Relay.OutboxDepth.Set(await context.Outbox.CountAsync());
-                var oldest = await context.Outbox.MinAsync(t => (DateTime?)t.CreatedAt);
+                var oldestScheduled = await context.Tasks.Where(t => t.NextAttemptAt > DateTime.UtcNow).MinAsync(t => (DateTime?)t.CreatedAt);
+                var oldestUnpublished = await context.Outbox.Where(t => t.NextAttemptAt < DateTime.UtcNow).MinAsync(t => t.NextAttemptAt);
                 AppMetrics.Relay.OutboxOldestUnpublishedSeconds.Set(
-                    oldest is null ? 0 : (DateTime.UtcNow - oldest.Value).TotalSeconds);
+                    oldestUnpublished is null ? 0 : (DateTime.UtcNow - oldestUnpublished.Value).TotalSeconds);
+                AppMetrics.Relay.OutboxOldestScheduledSeconds.Set(
+                    oldestScheduled is null ? 0 : (DateTime.UtcNow - oldestScheduled.Value).TotalSeconds);  
             }
             catch (Exception ex)
             {
