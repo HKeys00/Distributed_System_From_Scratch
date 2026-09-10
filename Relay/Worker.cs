@@ -69,12 +69,12 @@ namespace Relay
             _processingOutbox = false;
             _processingStale = false;
 
-            _outBoxTimer = new Timer(5000);
+            _outBoxTimer = new Timer(1000);
             _outBoxTimer.AutoReset = true;
             _outBoxTimer.Enabled = false;
             _outBoxTimer.Elapsed += async (_, _) => await OnProcessOutboxQueue();
 
-            _staleTimer = new Timer(10000);
+            _staleTimer = new Timer(3000);
             _staleTimer.AutoReset = true;
             _staleTimer.Enabled = false;
             _staleTimer.Elapsed += async (_, _) => await OnProcessStaleTasks();
@@ -493,8 +493,8 @@ namespace Relay
             try
             {
                 AppMetrics.Relay.OutboxDepth.Set(await context.Outbox.CountAsync());
-                var oldestScheduled = await context.Tasks.Where(t => t.NextAttemptAt > DateTime.UtcNow).MinAsync(t => (DateTime?)t.CreatedAt);
-                var oldestUnpublished = await context.Outbox.Where(t => t.NextAttemptAt < DateTime.UtcNow).MinAsync(t => t.NextAttemptAt);
+                var oldestScheduled = await context.Scheduled.MinAsync(t => (DateTime?)t.CreatedAt);
+                var oldestUnpublished = await context.Outbox.MinAsync(t => t.NextAttemptAt);
                 AppMetrics.Relay.OutboxOldestUnpublishedSeconds.Set(
                     oldestUnpublished is null ? 0 : (DateTime.UtcNow - oldestUnpublished.Value).TotalSeconds);
                 AppMetrics.Relay.OutboxOldestScheduledSeconds.Set(
@@ -505,8 +505,7 @@ namespace Relay
                 _logger.LogDebug(ex, "Could not read outbox metrics");
             }
 
-            int page = 1;
-            const int pageSize = 5;
+            const int pageSize = 100;
 
             while (true)
             {
@@ -523,7 +522,7 @@ namespace Relay
                     }
                     else
                     {
-                        tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize * page).AsNoTracking().ToListAsync();
+                        tasks = await context.Outbox.OrderBy(t => t.Id).Take(pageSize).AsNoTracking().ToListAsync();
                         await fetchTx.CommitAsync();
                     }
                 }
@@ -576,8 +575,6 @@ namespace Relay
                     await OnDemotedToFollower();
                     return;
                 }
-
-                page++;
             }
 
             _processingOutbox = false;

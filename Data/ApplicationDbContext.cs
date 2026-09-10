@@ -25,6 +25,12 @@ namespace Data
         public DbSet<StaleWorkItem> StaleTasks { get; set; }
 
         /// <summary>
+        /// Gets or sets the view containing unsent messages whose next attempt is
+        /// scheduled for the future (i.e. waiting on backoff).
+        /// </summary>
+        public DbSet<ScheduledWorkItem> Scheduled { get; set; }
+
+        /// <summary>
         /// Represents the collection of Conflict entities in the database context.
         /// </summary>
         public DbSet<Conflict> Conflicts { get; set; }
@@ -116,6 +122,7 @@ namespace Data
 
             modelBuilder.Entity<OutboxWorkItem>().ToView("outbox");
             modelBuilder.Entity<StaleWorkItem>().ToView("staletasks");
+            modelBuilder.Entity<ScheduledWorkItem>().ToView("scheduled");
         }
 
         #endregion

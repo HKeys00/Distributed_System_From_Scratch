@@ -759,4 +759,11 @@ Ok so there would be a table called leader or something with a single row, which
 - Metric is completely useless, measuring on outbox where it's impossible to have a task with a NextAttemptAt > time.Now(), can switch it to tasks table but that becomes slower and slower as the task table grows (is that an issue?)
 - Leader failed on boot due to race condition of table being created and populated 
 - Sit down and thing about the metrics being recorded and where they are being recorded because they're providing useless data at the moment.
+- The metrics I have aren't designed for the system in place, the system will constantly be "under stress" because for every url the worker crawls they get 30 more, so what metrics are actually worthwhile
+
+- Outbox depth: This fluctuates widely at the moment, and a steady rising gauge can indicate the relay is broken or that it's functioning perfectly fine it's just under stress so I don't think is a good gauge
+- Stale tasks: Again this is similar to the outbox depth, maybe increasing the time limit that determines a stale task would be a good start
+- I think increasing the relay's consume rate would be useful, because we don't really care if they're sitting in rabbitmq waiting since they're durable at that point, ok yeah the outbox timer was 5 seconds and the stale was 10 seconds, bringing that down will help
+- The outbox scrape only takes 5 tasks at a time no fucking wonder this was chocking, ok I'll keep the metrics as is for now, I think I'll add a scheduled view that I can use for the metrics rather than grabbing the tasks table
+
 
