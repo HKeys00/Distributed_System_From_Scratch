@@ -766,4 +766,8 @@ Ok so there would be a table called leader or something with a single row, which
 - I think increasing the relay's consume rate would be useful, because we don't really care if they're sitting in rabbitmq waiting since they're durable at that point, ok yeah the outbox timer was 5 seconds and the stale was 10 seconds, bringing that down will help
 - The outbox scrape only takes 5 tasks at a time no fucking wonder this was chocking, ok I'll keep the metrics as is for now, I think I'll add a scheduled view that I can use for the metrics rather than grabbing the tasks table
 
+11/09/26
+- ok somehow everything has crashed on the k8s box I'm getting a crash loop backoff from coredns
 
+14/09/26
+- Ok I restarted the deployments, went and took a nap and now everything's green again

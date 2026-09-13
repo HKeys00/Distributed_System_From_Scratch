@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ghcr.io/hkeys00/worker:v1.0.1
+          image: ghcr.io/hkeys00/worker:v1.0.2
           ports:
             - containerPort: 8080
           env:
